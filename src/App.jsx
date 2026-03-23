@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import './App.css'
 import { Toaster } from "@/components/ui/toaster"
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -9,6 +10,7 @@ import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
+import { seedJamesKennedy } from '@/utils/seedDemoData';
 
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
@@ -20,6 +22,14 @@ const LayoutWrapper = ({ children, currentPageName }) => Layout ?
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
+  const seeded = useRef(false);
+
+  useEffect(() => {
+    if (!isLoadingAuth && !isLoadingPublicSettings && !authError && !seeded.current) {
+      seeded.current = true;
+      seedJamesKennedy();
+    }
+  }, [isLoadingAuth, isLoadingPublicSettings, authError]);
 
   // Show loading spinner while checking app public settings or auth
   if (isLoadingPublicSettings || isLoadingAuth) {
