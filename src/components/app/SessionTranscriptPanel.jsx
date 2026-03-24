@@ -247,7 +247,6 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
     const lines = text.split('\n');
     const normalizedLines = [];
 
-    // A standalone timestamp is ONLY digits and colons (e.g. "0:00" or "00:00:58")
     const isStandaloneTimestamp = (s) => /^\d{1,2}:\d{2}(:\d{2})?$/.test(s.trim());
 
     const formatTs = (ts) => {
@@ -258,48 +257,84 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
       return '00:00:00';
     };
 
-    // Google Meet transcript format (from transcript_doc_id):
-    // Header line: "Meeting ... - Transcript"
-    // 00:00:00  (timestamp block)
-    // (blank)
-    // Speaker: text
-    // Speaker: text
-    // ...
-    // 00:00:58  (next timestamp block)
-    // (blank)
-    // Speaker: text
-    // ...
-    //
-    // Each line within a block is "SpeakerName: spoken text"
-    // We split each "SpeakerName: text" line into its own card with the current block timestamp.
+    // Handles two formats:
+    // Format A (inline): "SpeakerName: spoken text" after a standalone timestamp
+    // Format B (split):  "SpeakerName" alone on a line, then standalone timestamp, then "spoken text" line(s)
 
-    const speakerLineRegex = /^([^:]+):\s*(.+)$/;
-    let currentBlockTimestamp = '00:00:00';
-    // Skip everything before the first standalone timestamp (header/boilerplate)
+    let lastSpeaker = null;
+    let lastTimestamp = null;
+    let lastText = null;
+    let pendingSpeaker = null; // speaker name seen before a timestamp (Format B)
     let foundFirstTimestamp = false;
+
+    const pushEntry = () => {
+      if (lastSpeaker && lastText) {
+        normalizedLines.push(`[${formatTs(lastTimestamp)}] ${lastSpeaker}: ${lastText}`);
+      }
+    };
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
 
       if (isStandaloneTimestamp(line)) {
-        currentBlockTimestamp = line;
         foundFirstTimestamp = true;
+        // In Format B, speaker came before this timestamp — store it as pending
+        // (pendingSpeaker is already set from the line before this)
+        lastTimestamp = line;
         continue;
       }
 
-      // Don't parse any speaker lines until we've seen the first timestamp
-      if (!foundFirstTimestamp) continue;
-
-      const match = line.match(speakerLineRegex);
-      if (match) {
-        const speaker = match[1].trim();
-        const spokenText = match[2].trim();
-        if (spokenText && spokenText !== ' ') {
-          normalizedLines.push(`[${formatTs(currentBlockTimestamp)}] ${speaker}: ${spokenText}`);
+      if (!foundFirstTimestamp) {
+        // Check if this could be a speaker name (no colon, not a timestamp)
+        // Store as pending in case Format B applies
+        if (!/[:]/.test(line)) {
+          pendingSpeaker = line;
         }
+        continue;
+      }
+
+      // Check if this line is "SpeakerName: text" (Format A)
+      const inlineMatch = line.match(/^([^:]+):\s+(.+)$/);
+      if (inlineMatch) {
+        pendingSpeaker = null;
+        const speaker = inlineMatch[1].trim();
+        const spokenText = inlineMatch[2].trim();
+        if (speaker === lastSpeaker && lastTimestamp) {
+          lastText += ' ' + spokenText;
+        } else {
+          pushEntry();
+          lastSpeaker = speaker;
+          lastText = spokenText;
+        }
+        continue;
+      }
+
+      // Plain text line — could be Format B text after a speaker+timestamp
+      // Or a speaker name before the next timestamp
+      const isLikelySpeakerName = !/[.!?,]/.test(line) && line.split(' ').length <= 4;
+
+      if (isLikelySpeakerName && !pendingSpeaker) {
+        // Treat as a speaker name for the next Format B block
+        pendingSpeaker = line;
+        continue;
+      }
+
+      // It's spoken text
+      const speaker = pendingSpeaker || lastSpeaker;
+      pendingSpeaker = null;
+      if (!speaker) continue;
+
+      if (speaker === lastSpeaker && lastTimestamp) {
+        lastText += ' ' + line;
+      } else {
+        pushEntry();
+        lastSpeaker = speaker;
+        lastText = line;
       }
     }
+
+    pushEntry();
 
     return normalizedLines.length > 0 ? normalizedLines.join('\n') : text;
   };
@@ -522,30 +557,46 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
                 </div>
               )}
               {!loadingTranscript && transcriptLines.map((line, idx) => {
-                const match = line.match(/^(\[\d{2}:\d{2}:\d{2}\])\s(.*?):\s(.*)$/);
-                if (match) {
-                  const [_, timestamp, speaker, text] = match;
-                  const isCoach = isCoachSpeaker(speaker);
-                  
-                  return (
-                    <div key={idx} className={`flex flex-col ${isCoach ? 'items-start' : 'items-end'}`}>
-                      <div className={`flex items-baseline gap-2 mb-1 ${isCoach ? 'flex-row' : 'flex-row-reverse'}`}>
-                        <span className="text-xs font-semibold" style={{ color: isCoach ? 'var(--nm-badge-primary-color)' : 'var(--nm-badge-info-color)' }}>
-                          {speaker}
-                        </span>
-                        <span className="text-[10px]" style={{ color: 'var(--nm-badge-default-color)' }}>{timestamp}</span>
-                      </div>
-                      <div 
-                        className="group relative px-4 pt-3 pb-8 text-sm max-w-[85%] rounded-2xl leading-relaxed shadow-sm"
+                 const match = line.match(/^(\[\d{2}:\d{2}:\d{2}\])\s+(.+?):\s(.*)$/);
+                 if (match) {
+                   const [_, timestamp, speaker, text] = match;
+                   const isCoach = isCoachSpeaker(speaker);
+
+                   // Interrupted: next card is a different speaker AND the card after that is this same speaker again
+                   const nextMatch = idx < transcriptLines.length - 1 ? transcriptLines[idx + 1]?.match(/^(\[\d{2}:\d{2}:\d{2}\])\s+(.+?):\s(.*)$/) : null;
+                   const nextNextMatch = idx < transcriptLines.length - 2 ? transcriptLines[idx + 2]?.match(/^(\[\d{2}:\d{2}:\d{2}\])\s+(.+?):\s(.*)$/) : null;
+                   const isInterrupted = !!(nextMatch && nextNextMatch && nextMatch[2] !== speaker && nextNextMatch[2] === speaker && nextMatch[3].length < 100);
+
+                   // Continuation: previous card was a different speaker AND the card before that was this same speaker
+                   const prevMatch = idx > 0 ? transcriptLines[idx - 1]?.match(/^(\[\d{2}:\d{2}:\d{2}\])\s+(.+?):\s(.*)$/) : null;
+                   const prePrevMatch = idx >= 2 ? transcriptLines[idx - 2]?.match(/^(\[\d{2}:\d{2}:\d{2}\])\s+(.+?):\s(.*)$/) : null;
+                   const isContinuation = !!(prevMatch && prePrevMatch && prevMatch[2] !== speaker && prePrevMatch[2] === speaker && prevMatch[3].length < 100);
+
+                   return (
+                     <div key={idx} className={`flex flex-col ${isCoach ? 'items-start' : 'items-end'}`}>
+                       <div className={`flex items-baseline gap-2 mb-1 ${isCoach ? 'flex-row' : 'flex-row-reverse'}`}>
+                         <span className="text-xs font-semibold" style={{ color: isCoach ? 'var(--nm-badge-primary-color)' : 'var(--nm-badge-info-color)' }}>
+                           {speaker}
+                         </span>
+                         <span className="text-[10px]" style={{ color: 'var(--nm-badge-default-color)' }}>{timestamp}</span>
+                       </div>
+                       <div 
+                         className="group relative px-4 pt-3 pb-8 text-sm max-w-[85%] rounded-2xl leading-relaxed shadow-sm"
                         style={{
-                          background: isCoach ? 'var(--nm-background)' : '#4299e115',
-                          boxShadow: isCoach ? 'var(--nm-shadow-main)' : 'inset 1px 1px 3px rgba(255,255,255,0.4), inset -1px -1px 3px rgba(0,0,0,0.05)',
-                          border: isCoach ? '1px solid rgba(255,255,255,0.5)' : '1px solid rgba(66, 153, 225, 0.2)',
-                          borderBottomLeftRadius: isCoach ? '4px' : '16px',
-                          borderBottomRightRadius: !isCoach ? '4px' : '16px',
-                        }}
-                      >
-                        {renderTextWithGuardian(text, timestamp, searchTerm)}
+                           background: isCoach ? 'var(--nm-background)' : '#4299e115',
+                           boxShadow: isCoach ? 'var(--nm-shadow-main)' : 'inset 1px 1px 3px rgba(255,255,255,0.4), inset -1px -1px 3px rgba(0,0,0,0.05)',
+                           border: isCoach ? '1px solid rgba(255,255,255,0.5)' : '1px solid rgba(66, 153, 225, 0.2)',
+                           borderBottomLeftRadius: isCoach ? '4px' : '16px',
+                           borderBottomRightRadius: !isCoach ? '4px' : '16px',
+                         }}
+                        >
+                         {isContinuation && (
+                           <span className="text-sm opacity-30 mr-1" style={{ color: 'var(--nm-badge-default-color)' }}>...</span>
+                         )}
+                         {renderTextWithGuardian(text, timestamp, searchTerm)}
+                         {isInterrupted && (
+                           <span className="text-sm opacity-30 ml-1" style={{ color: 'var(--nm-badge-default-color)' }}>...</span>
+                         )}
                         
                         <div className="absolute bottom-2 right-3 flex items-center gap-1 z-10">
                           {isGuardianActive && outOfScopeAlerts[timestamp] && (
