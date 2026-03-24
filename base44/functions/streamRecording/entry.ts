@@ -104,10 +104,43 @@ Deno.serve(async (req) => {
             return Response.json({ success: false, error: 'Failed to verify recording file: ' + fetchErr.message }, { status: 500 });
         }
 
+        // Resolve the redirect to get a temporary signed URL that works without auth
+        let streamUrl;
+        try {
+            const downloadResponse = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+                {
+                    headers: { 'Authorization': `Bearer ${accessToken}` },
+                    redirect: 'manual'  // Don't follow redirect, capture the Location header
+                }
+            );
+
+            if (downloadResponse.status === 302 || downloadResponse.status === 303 || downloadResponse.status === 307) {
+                // Google returns a temporary signed URL — this works without auth
+                streamUrl = downloadResponse.headers.get('Location');
+                console.log('Got redirect URL (first 100 chars):', streamUrl?.substring(0, 100));
+            } else if (downloadResponse.ok) {
+                // No redirect — unusual, but the original URL works directly
+                // Fall back to the access_token approach
+                streamUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${accessToken}`;
+                console.log('No redirect, using direct URL with token');
+            } else {
+                const errText = await downloadResponse.text();
+                console.error('Download URL error:', downloadResponse.status, errText);
+                return Response.json({ success: false, error: 'Cannot access recording file for streaming' }, { status: 500 });
+            }
+        } catch (dlErr) {
+            console.error('Download redirect error:', dlErr.message);
+            return Response.json({ success: false, error: 'Failed to get streaming URL: ' + dlErr.message }, { status: 500 });
+        }
+
+        if (!streamUrl) {
+            return Response.json({ success: false, error: 'No streaming URL obtained' }, { status: 500 });
+        }
+
         return Response.json({
             success: true,
-            downloadUrl: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-            accessToken,
+            streamUrl,
             mimeType: fileMeta.mimeType || 'video/mp4',
             fileSize: parseInt(fileMeta.size || '0', 10),
             fileName: fileMeta.name || 'recording'

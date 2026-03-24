@@ -67,12 +67,11 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
       base44.functions.invoke('streamRecording', { sessionId: session.id })
         .then((res) => {
           const data = res.data;
-          if (!data?.success || !data?.downloadUrl || !data?.accessToken) {
+          if (!data?.success || !data?.streamUrl) {
             throw new Error(data?.error || 'Failed to get recording access');
           }
-          // Use access_token as query param for direct streaming (no blob download)
-          const streamUrl = `${data.downloadUrl}&access_token=${data.accessToken}`;
-          setRecordingUrl(streamUrl);
+          // Use the temporary signed URL from Google (no auth needed)
+          setRecordingUrl(data.streamUrl);
         })
         .catch((err) => {
           console.error('Recording load failed:', err);
