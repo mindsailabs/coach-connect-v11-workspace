@@ -17,39 +17,49 @@
 
 ## Change History
 
-### 2026-03-24 — Fix: Artifact Access (Google Sign-In Issue)
+### 2026-03-24 — Fix: Artifact Access (Video Streaming Proxy)
 
-**Problem:** Coaches were prompted to sign in to Google when viewing session recordings, transcripts, or Gemini notes. Files in info@mindsailabs.com's Drive were not shared with the coach.
+**Problem:** Coaches were prompted to sign in to Google when viewing session recordings. Files in info@mindsailabs.com's Drive required Google authentication, and even email-based sharing only works if the coach is also logged into Google in their browser.
 
 **Root Cause:**
-- `SessionRecordingPanel.jsx` embedded raw `drive.google.com/file/d/.../preview` URLs directly from `session.recording_file_id` — these require the viewer to have Drive access
-- `backfillArtifacts` had a `shareFileWithCoach()` function but it relied on `session.coach_email` being populated, which wasn't always the case
-- `getSessionArtifactContent` proxied transcript/notes text correctly but returned a raw Drive embed URL for recordings without ensuring access
-- The recording panel never called the backend at all — it built the URL client-side
+- `SessionRecordingPanel.jsx` embedded raw `drive.google.com/file/d/.../preview` iframe URLs
+- Google Drive iframes ALWAYS require the viewer to have an active Google session — regardless of file permissions
+- Transcripts/notes were already proxied server-side (text returned as JSON) — they worked fine
+- The recording was the only artifact still using a raw Drive embed
+
+**Solution: Backend Video Streaming Proxy**
+- Created `streamRecording` function that uses the service account to download the video binary from Drive and streams it directly to the frontend
+- The coach's browser never contacts Google — all video data flows through our backend
+- Frontend uses a blob URL with a native `<video>` element instead of a Drive iframe
+- Privacy preserved: files stay private in Drive, no public links, no Google sign-in needed
 
 **Changes Made:**
 
-1. **`base44/functions/backfillArtifacts/entry.ts`**
-   - Kept `shareFileWithCoach()` — shares files with coach's email as reader (not public)
-   - Added warning log when `coach_email` is missing so we can track sessions that need it
+1. **NEW: `base44/functions/streamRecording/entry.ts`**
+   - Receives `sessionId`, verifies access, fetches video from Drive via service account
+   - Returns raw video binary stream (not JSON) with correct Content-Type headers
+   - Supports any video mime type (mp4, webm, etc.)
 
 2. **`base44/functions/getSessionArtifactContent/entry.ts`**
-   - Upgraded Drive scope from `drive.readonly` to `drive` (needed to create permissions)
-   - Now shares the recording file with the coach's email before returning the embed URL
-   - Acts as a fallback permission-setter even if backfill didn't run
+   - Removed Drive embed URL and permission sharing for recordings
+   - Now returns `recordingSessionId` flag instead of `recordingEmbedUrl`
+   - Reverted scope back to `drive.readonly` (no longer needs write permissions)
+   - Transcripts/notes still proxied as text (unchanged)
 
 3. **`src/components/app/SessionRecordingPanel.jsx`**
-   - Now calls `getSessionArtifactContent` before rendering the embed
-   - Backend ensures sharing is set before the iframe loads
-   - Shows loading spinner while backend processes
-   - Falls back to direct Drive URL if backend call fails
+   - Uses raw `fetch()` to call `streamRecording` (not SDK invoke, since response is binary)
+   - Converts response blob to blob URL for native `<video>` playback
+   - Shows loading spinner during download, error state on failure
+   - Cleans up blob URLs on unmount to prevent memory leaks
+   - Falls back to direct URL if `session.recording_url` is set (non-Drive recordings)
 
-4. **NEW: `base44/functions/fixExistingArtifactPermissions/entry.ts`**
-   - One-time function to fix all existing sessions
-   - Iterates all sessions with artifact file IDs
-   - Shares each file with the session's `coach_email`
-   - Returns summary: sessions processed, files shared, errors
-   - Run from Base44 dashboard after sync
+4. **`base44/functions/backfillArtifacts/entry.ts`** (from earlier commit)
+   - Still shares files with coach_email as reader (useful for direct Drive access)
+   - Added warning log when coach_email is missing
+
+5. **`base44/functions/fixExistingArtifactPermissions/entry.ts`** (from earlier commit)
+   - One-time function to share existing session artifacts with coach_email
+   - Run from Base44 dashboard
 
 ### 2026-03-24 — Initial Setup & Test Contacts
 

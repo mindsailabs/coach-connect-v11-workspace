@@ -6,6 +6,7 @@ import ViewHeader from '@/components/ui/ViewHeader';
 import NeumorphicBadge from '@/components/ui/NeumorphicBadge';
 import { formatDate, formatTime } from '@/components/utils/entityHelpers';
 import { base44 } from '@/api/base44Client';
+import { appParams } from '@/lib/app-params';
 
 const getPlatformInfo = (platformStr, linkStr = '') => {
   const p = (platformStr || '').toLowerCase();
@@ -34,6 +35,7 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [recordingUrl, setRecordingUrl] = useState(null);
   const [loadingRecording, setLoadingRecording] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
     const handleEscape = (e) => {
@@ -43,29 +45,66 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [onClose]);
 
-  // Call backend to ensure file is shared with coach before embedding
+  // Stream recording via backend proxy — no Google sign-in needed
   useEffect(() => {
+    let blobUrl = null;
+
     if (!session?.id) return;
+
+    // If there's a direct recording URL (non-Drive), use it
     if (session?.recording_url) {
       setRecordingUrl(session.recording_url);
       return;
     }
+
+    // If there's a Drive file ID, stream it through our backend proxy
     if (session?.recording_file_id) {
       setLoadingRecording(true);
-      base44.functions.invoke('getSessionArtifactContent', { sessionId: session.id })
-        .then(res => {
-          if (res.recordingEmbedUrl) {
-            setRecordingUrl(res.recordingEmbedUrl);
+      setLoadError(null);
+
+      // Build the function URL and call with fetch to get binary response
+      const { serverUrl, appId, functionsVersion } = appParams;
+      const token = localStorage.getItem('base44_access_token') || appParams.token;
+      const version = functionsVersion || 'latest';
+      const functionUrl = `${serverUrl}/api/apps/${appId}/functions/${version}/streamRecording`;
+
+      fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ sessionId: session.id })
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `Server error: ${res.status}`);
+          }
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.startsWith('video/') || contentType.startsWith('application/octet-stream')) {
+            const blob = await res.blob();
+            blobUrl = URL.createObjectURL(blob);
+            setRecordingUrl(blobUrl);
           } else {
-            // Fallback to direct Drive URL
-            setRecordingUrl(`https://drive.google.com/file/d/${session.recording_file_id}/preview`);
+            // Unexpected JSON response (maybe error)
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || 'Unexpected response type');
           }
         })
-        .catch(() => {
-          setRecordingUrl(`https://drive.google.com/file/d/${session.recording_file_id}/preview`);
+        .catch((err) => {
+          console.error('Failed to stream recording:', err);
+          setLoadError(err.message || 'Failed to load recording. Please try again.');
         })
         .finally(() => setLoadingRecording(false));
     }
+
+    // Cleanup blob URL on unmount
+    return () => {
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+      }
+    };
   }, [session?.id, session?.recording_url, session?.recording_file_id]);
 
   const { effectiveStart, effectiveDuration } = React.useMemo(() => {
@@ -179,22 +218,19 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
                   <Loader2 className="w-10 h-10 animate-spin opacity-50" />
                   <p>Loading recording...</p>
                 </div>
+              ) : loadError ? (
+                <div className="text-white opacity-70 flex flex-col items-center gap-4 p-6 text-center">
+                  <FileVideo className="w-12 h-12 mb-2 opacity-50" />
+                  <p>{loadError}</p>
+                </div>
               ) : recordingUrl ? (
-                recordingUrl.toLowerCase().endsWith('.mp4') ? (
-                  <video
-                    src={recordingUrl}
-                    controls
-                    className="w-full h-full object-contain"
-                  >
-                    Your browser does not support the video tag.
-                  </video>
-                ) : (
-                  <iframe
-                    src={recordingUrl}
-                    className="w-full h-full border-0"
-                    allow="autoplay; fullscreen"
-                  />
-                )
+                <video
+                  src={recordingUrl}
+                  controls
+                  className="w-full h-full object-contain"
+                >
+                  Your browser does not support the video tag.
+                </video>
               ) : (
                 <div className="text-white opacity-70 flex flex-col items-center gap-4 p-6 text-center">
                   <FileVideo className="w-12 h-12 mb-2 opacity-50" />
