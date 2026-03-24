@@ -193,10 +193,8 @@ Deno.serve(async (req) => {
         }
 
         if (hasRecording) {
-            // Recording is served via the streamRecording proxy function
-            // which uses the service account to fetch the video — no Drive embed needed
+            result.recordingEmbedUrl = `https://drive.google.com/file/d/${session.recording_file_id}/preview`;
             result.hasRecording = true;
-            result.recordingSessionId = session.id;
         }
 
         return Response.json(result);
@@ -205,10 +203,8 @@ Deno.serve(async (req) => {
         console.error('=== Get Artifact Content Error ===');
         console.error('Error:', error.message);
         return Response.json({
-            transcript: '', notes: '',
-            hasTranscript: false, hasNotes: false,
-            hasRecording: !!session?.recording_file_id,
-            recordingSessionId: session?.id || null,
+            transcript: '', notes: '', recordingEmbedUrl: session?.recording_file_id ? `https://drive.google.com/file/d/${session.recording_file_id}/preview` : null,
+            hasTranscript: false, hasNotes: false, hasRecording: !!session?.recording_file_id,
             message: 'Error fetching artifacts'
         });
     }

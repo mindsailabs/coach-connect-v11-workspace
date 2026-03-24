@@ -51,12 +51,12 @@ async function shareFileWithCoach(drive, fileId, coachEmail) {
             },
             sendNotificationEmail: false
         });
-        console.log('Shared file', fileId, 'with coach:', coachEmail);
+        console.log('Shared file', fileId, 'with', coachEmail);
     } catch (e) {
         if (e.message && e.message.includes('already has access')) {
             console.log('File already shared with coach');
         } else {
-            console.error('Failed to share file with coach:', e.message);
+            console.error('Failed to share file:', e.message);
         }
     }
 }
@@ -228,8 +228,7 @@ Deno.serve(async (req) => {
             await base44.asServiceRole.entities.Session.update(sessionId, updates);
         }
 
-        // Share all artifact files with the coach's email so they can view them
-        // without needing to request access each time
+        // Share all artifact files with the coach so they can view them (no more "Request Access")
         const coachEmail = session.coach_email;
         if (coachEmail) {
             const sessionAfterUpdate = await base44.asServiceRole.entities.Session.get(sessionId);
@@ -242,8 +241,6 @@ Deno.serve(async (req) => {
             if (sessionAfterUpdate.gemini_notes_doc_id) {
                 await shareFileWithCoach(drive, sessionAfterUpdate.gemini_notes_doc_id, coachEmail);
             }
-        } else {
-            console.warn('No coach_email on session — cannot share artifact files');
         }
 
         // Update status - set to completed if we have any artifact
