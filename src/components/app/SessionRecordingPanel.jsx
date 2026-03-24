@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Brain, Shield, FileVideo, Video, Flag, Clock, Trash2, Download, Share2 } from 'lucide-react';
+import { Search, Brain, Shield, FileVideo, Video, Flag, Clock, Trash2, Download, Share2, Loader2 } from 'lucide-react';
 import NeumorphicCard from '@/components/ui/NeumorphicCard';
 import ViewHeader from '@/components/ui/ViewHeader';
 import NeumorphicBadge from '@/components/ui/NeumorphicBadge';
 import { formatDate, formatTime } from '@/components/utils/entityHelpers';
+import { base44 } from '@/api/base44Client';
 
 const getPlatformInfo = (platformStr, linkStr = '') => {
   const p = (platformStr || '').toLowerCase();
@@ -31,6 +32,8 @@ const getPlatformInfo = (platformStr, linkStr = '') => {
 export default function SessionRecordingPanel({ session, contact, onClose }) {
   const [showSearch, setShowSearch] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [recordingUrl, setRecordingUrl] = useState(null);
+  const [loadingRecording, setLoadingRecording] = useState(false);
 
   useEffect(() => {
     const handleEscape = (e) => {
@@ -39,6 +42,31 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [onClose]);
+
+  // Call backend to ensure file is shared with coach before embedding
+  useEffect(() => {
+    if (!session?.id) return;
+    if (session?.recording_url) {
+      setRecordingUrl(session.recording_url);
+      return;
+    }
+    if (session?.recording_file_id) {
+      setLoadingRecording(true);
+      base44.functions.invoke('getSessionArtifactContent', { sessionId: session.id })
+        .then(res => {
+          if (res.recordingEmbedUrl) {
+            setRecordingUrl(res.recordingEmbedUrl);
+          } else {
+            // Fallback to direct Drive URL
+            setRecordingUrl(`https://drive.google.com/file/d/${session.recording_file_id}/preview`);
+          }
+        })
+        .catch(() => {
+          setRecordingUrl(`https://drive.google.com/file/d/${session.recording_file_id}/preview`);
+        })
+        .finally(() => setLoadingRecording(false));
+    }
+  }, [session?.id, session?.recording_url, session?.recording_file_id]);
 
   const { effectiveStart, effectiveDuration } = React.useMemo(() => {
     let start = session?.start_datetime || session?.date_time;
@@ -146,28 +174,27 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
 
             
             <div className="flex-1 bg-black self-stretch min-h-[300px] md:min-h-[500px] -mx-6 mt-4 overflow-hidden flex items-center justify-center relative mb-4">
-              {session?.recording_url ? (
-                session.recording_url.toLowerCase().endsWith('.mp4') ? (
-                  <video 
-                    src={session.recording_url} 
-                    controls 
+              {loadingRecording ? (
+                <div className="text-white opacity-70 flex flex-col items-center gap-4 p-6 text-center">
+                  <Loader2 className="w-10 h-10 animate-spin opacity-50" />
+                  <p>Loading recording...</p>
+                </div>
+              ) : recordingUrl ? (
+                recordingUrl.toLowerCase().endsWith('.mp4') ? (
+                  <video
+                    src={recordingUrl}
+                    controls
                     className="w-full h-full object-contain"
                   >
                     Your browser does not support the video tag.
                   </video>
                 ) : (
-                  <iframe 
-                    src={session.recording_url} 
+                  <iframe
+                    src={recordingUrl}
                     className="w-full h-full border-0"
                     allow="autoplay; fullscreen"
                   />
                 )
-              ) : session?.recording_file_id ? (
-                <iframe 
-                  src={`https://drive.google.com/file/d/${session.recording_file_id}/preview`} 
-                  className="w-full h-full border-0"
-                  allow="autoplay; fullscreen"
-                />
               ) : (
                 <div className="text-white opacity-70 flex flex-col items-center gap-4 p-6 text-center">
                   <FileVideo className="w-12 h-12 mb-2 opacity-50" />

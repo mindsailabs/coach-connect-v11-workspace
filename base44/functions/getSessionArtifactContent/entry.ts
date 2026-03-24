@@ -28,7 +28,7 @@ async function getImpersonatedAuth() {
     const auth = new google.auth.JWT({
         email: serviceAccountEmail,
         key: serviceAccountKey,
-        scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+        scopes: ['https://www.googleapis.com/auth/drive'],
         subject: hostUser
     });
 
@@ -193,6 +193,29 @@ Deno.serve(async (req) => {
         }
 
         if (hasRecording) {
+            // Ensure the recording file is shared with the coach's email
+            // so the Drive embed doesn't prompt for Google sign-in
+            const coachEmail = session.coach_email;
+            if (coachEmail) {
+                try {
+                    const recordingAuth = await getImpersonatedAuth();
+                    const recordingDrive = google.drive({ version: 'v3', auth: recordingAuth });
+                    await recordingDrive.permissions.create({
+                        fileId: session.recording_file_id,
+                        requestBody: {
+                            type: 'user',
+                            role: 'reader',
+                            emailAddress: coachEmail
+                        },
+                        sendNotificationEmail: false
+                    });
+                    console.log('Shared recording with coach:', coachEmail);
+                } catch (permError) {
+                    if (!permError.message?.includes('already has access')) {
+                        console.error('Could not share recording with coach:', permError.message);
+                    }
+                }
+            }
             result.recordingEmbedUrl = `https://drive.google.com/file/d/${session.recording_file_id}/preview`;
             result.hasRecording = true;
         }
