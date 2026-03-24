@@ -81,8 +81,20 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
             headers: { 'Authorization': `Bearer ${data.accessToken}` }
           });
 
+          const contentType = videoRes.headers.get('content-type') || '';
+          console.log('Drive response status:', videoRes.status, 'content-type:', contentType, 'url:', videoRes.url?.substring(0, 100));
+
           if (!videoRes.ok) {
-            throw new Error(`Download failed: HTTP ${videoRes.status}`);
+            const errBody = await videoRes.text().catch(() => '');
+            console.error('Drive download error body:', errBody.substring(0, 500));
+            throw new Error(`Download failed: HTTP ${videoRes.status} - ${contentType}`);
+          }
+
+          // If Google returned HTML instead of video, the auth failed silently
+          if (contentType.includes('text/html') || contentType.includes('application/json')) {
+            const errBody = await videoRes.text().catch(() => '');
+            console.error('Drive returned non-video content:', contentType, errBody.substring(0, 500));
+            throw new Error(`Google returned ${contentType} instead of video. Auth may have been rejected.`);
           }
 
           // Read response with progress tracking
@@ -98,6 +110,15 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
             if (fileSize > 0) {
               setDownloadProgress(Math.round((received / fileSize) * 100));
             }
+          }
+
+          console.log('Download complete. Total bytes:', received, 'Expected:', fileSize);
+
+          // Sanity check: if we got very little data, something went wrong
+          if (received < 10000) {
+            const text = new TextDecoder().decode(chunks[0]);
+            console.error('Tiny response body:', text.substring(0, 500));
+            throw new Error('Download returned only ' + received + ' bytes (expected ~' + fileSize + '). Content may be an error page.');
           }
 
           // Create blob URL
