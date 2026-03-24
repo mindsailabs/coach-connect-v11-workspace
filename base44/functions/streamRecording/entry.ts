@@ -104,33 +104,32 @@ Deno.serve(async (req) => {
             return Response.json({ success: false, error: 'Failed to verify recording file: ' + fetchErr.message }, { status: 500 });
         }
 
-        // Resolve the redirect to get a temporary signed URL that works without auth
+        // Follow the redirect to get the final signed googleusercontent.com URL.
+        // Deno's fetch follows redirects by default. response.url gives the final URL.
+        // We cancel the body immediately so we don't download the whole file.
         let streamUrl;
         try {
+            console.log('Fetching download redirect for file:', fileId);
             const downloadResponse = await fetch(
                 `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-                {
-                    headers: { 'Authorization': `Bearer ${accessToken}` },
-                    redirect: 'manual'  // Don't follow redirect, capture the Location header
-                }
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
             );
 
-            if (downloadResponse.status === 302 || downloadResponse.status === 303 || downloadResponse.status === 307) {
-                // Google returns a temporary signed URL — this works without auth
-                streamUrl = downloadResponse.headers.get('Location');
-                console.log('Got redirect URL (first 100 chars):', streamUrl?.substring(0, 100));
-            } else if (downloadResponse.ok) {
-                // No redirect — unusual, but the original URL works directly
-                // Fall back to the access_token approach
-                streamUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${accessToken}`;
-                console.log('No redirect, using direct URL with token');
-            } else {
-                const errText = await downloadResponse.text();
-                console.error('Download URL error:', downloadResponse.status, errText);
-                return Response.json({ success: false, error: 'Cannot access recording file for streaming' }, { status: 500 });
+            // response.url is the FINAL URL after all redirects
+            streamUrl = downloadResponse.url;
+            console.log('Final URL after redirects (first 120 chars):', streamUrl?.substring(0, 120));
+            console.log('Response status:', downloadResponse.status);
+            console.log('Response type:', downloadResponse.type);
+
+            // Cancel the body - we only needed the final URL
+            try { await downloadResponse.body?.cancel(); } catch (_) { /* ignore */ }
+
+            if (!downloadResponse.ok) {
+                console.error('Download response not ok:', downloadResponse.status);
+                return Response.json({ success: false, error: 'Cannot access recording file: HTTP ' + downloadResponse.status }, { status: 500 });
             }
         } catch (dlErr) {
-            console.error('Download redirect error:', dlErr.message);
+            console.error('Download redirect error:', dlErr.message, dlErr.stack);
             return Response.json({ success: false, error: 'Failed to get streaming URL: ' + dlErr.message }, { status: 500 });
         }
 
