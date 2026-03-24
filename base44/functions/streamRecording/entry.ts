@@ -104,42 +104,13 @@ Deno.serve(async (req) => {
             return Response.json({ success: false, error: 'Failed to verify recording file: ' + fetchErr.message }, { status: 500 });
         }
 
-        // Follow the redirect to get the final signed googleusercontent.com URL.
-        // Deno's fetch follows redirects by default. response.url gives the final URL.
-        // We cancel the body immediately so we don't download the whole file.
-        let streamUrl;
-        try {
-            console.log('Fetching download redirect for file:', fileId);
-            const downloadResponse = await fetch(
-                `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-                { headers: { 'Authorization': `Bearer ${accessToken}` } }
-            );
-
-            // response.url is the FINAL URL after all redirects
-            streamUrl = downloadResponse.url;
-            console.log('Final URL after redirects (first 120 chars):', streamUrl?.substring(0, 120));
-            console.log('Response status:', downloadResponse.status);
-            console.log('Response type:', downloadResponse.type);
-
-            // Cancel the body - we only needed the final URL
-            try { await downloadResponse.body?.cancel(); } catch (_) { /* ignore */ }
-
-            if (!downloadResponse.ok) {
-                console.error('Download response not ok:', downloadResponse.status);
-                return Response.json({ success: false, error: 'Cannot access recording file: HTTP ' + downloadResponse.status }, { status: 500 });
-            }
-        } catch (dlErr) {
-            console.error('Download redirect error:', dlErr.message, dlErr.stack);
-            return Response.json({ success: false, error: 'Failed to get streaming URL: ' + dlErr.message }, { status: 500 });
-        }
-
-        if (!streamUrl) {
-            return Response.json({ success: false, error: 'No streaming URL obtained' }, { status: 500 });
-        }
-
+        // Return the download URL and access token.
+        // The browser will fetch the video directly using the Authorization header.
+        // Google Drive API supports CORS for authenticated browser requests.
         return Response.json({
             success: true,
-            streamUrl,
+            downloadUrl: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+            accessToken,
             mimeType: fileMeta.mimeType || 'video/mp4',
             fileSize: parseInt(fileMeta.size || '0', 10),
             fileName: fileMeta.name || 'recording'

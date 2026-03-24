@@ -38,7 +38,9 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const [videoError, setVideoError] = useState(null);
+  const [downloadProgress, setDownloadProgress] = useState(0);
   const videoRef = useRef(null);
+  const blobUrlRef = useRef(null);
 
   useEffect(() => {
     const handleEscape = (e) => {
@@ -48,7 +50,7 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [onClose]);
 
-  // Fetch streaming URL from backend (returns access token + download URL)
+  // Fetch recording: get token from backend, then download video blob in browser
   const fetchRecordingUrl = useCallback(() => {
     if (!session?.id) return;
 
@@ -58,20 +60,54 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
       return;
     }
 
-    // Google Drive file — get temp token from backend, stream directly
+    // Google Drive file — download via blob with Authorization header
     if (session?.recording_file_id) {
       setLoadingRecording(true);
       setLoadError(null);
       setVideoReady(false);
+      setDownloadProgress(0);
 
       base44.functions.invoke('streamRecording', { sessionId: session.id })
-        .then((res) => {
+        .then(async (res) => {
           const data = res.data;
-          if (!data?.success || !data?.streamUrl) {
+          if (!data?.success || !data?.downloadUrl || !data?.accessToken) {
             throw new Error(data?.error || 'Failed to get recording access');
           }
-          // Use the temporary signed URL from Google (no auth needed)
-          setRecordingUrl(data.streamUrl);
+
+          const fileSize = data.fileSize || 0;
+
+          // Download video binary from Google Drive API
+          const videoRes = await fetch(data.downloadUrl, {
+            headers: { 'Authorization': `Bearer ${data.accessToken}` }
+          });
+
+          if (!videoRes.ok) {
+            throw new Error(`Download failed: HTTP ${videoRes.status}`);
+          }
+
+          // Read response with progress tracking
+          const reader = videoRes.body.getReader();
+          const chunks = [];
+          let received = 0;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            received += value.length;
+            if (fileSize > 0) {
+              setDownloadProgress(Math.round((received / fileSize) * 100));
+            }
+          }
+
+          // Create blob URL
+          const blob = new Blob(chunks, { type: data.mimeType || 'video/mp4' });
+          const url = URL.createObjectURL(blob);
+
+          // Clean up previous blob URL if any
+          if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = url;
+          setRecordingUrl(url);
         })
         .catch((err) => {
           console.error('Recording load failed:', err);
@@ -85,6 +121,12 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
 
   useEffect(() => {
     fetchRecordingUrl();
+    return () => {
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+    };
   }, [fetchRecordingUrl]);
 
   // Play/pause toggle
@@ -210,7 +252,19 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
               {loadingRecording ? (
                 <div className="text-white opacity-70 flex flex-col items-center gap-4 p-6 text-center">
                   <Loader2 className="w-10 h-10 animate-spin opacity-50" />
-                  <p>Loading recording...</p>
+                  {downloadProgress > 0 ? (
+                    <>
+                      <p>Downloading recording... {downloadProgress}%</p>
+                      <div className="w-48 h-1.5 rounded-full bg-white/20 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-300"
+                          style={{ width: `${downloadProgress}%`, background: '#2f949d' }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <p>Preparing recording...</p>
+                  )}
                 </div>
               ) : loadError ? (
                 <div className="text-white opacity-70 flex flex-col items-center gap-4 p-6 text-center">
