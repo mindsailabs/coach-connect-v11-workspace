@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Brain, Shield, FileVideo, Video, Flag, Clock, Trash2, Download, Share2, Loader2 } from 'lucide-react';
+import { Search, Brain, Shield, FileVideo, Video, Flag, Clock, Trash2, Download, Share2, Loader2, Play } from 'lucide-react';
 import NeumorphicCard from '@/components/ui/NeumorphicCard';
 import ViewHeader from '@/components/ui/ViewHeader';
 import NeumorphicBadge from '@/components/ui/NeumorphicBadge';
@@ -10,7 +10,7 @@ import { base44 } from '@/api/base44Client';
 const getPlatformInfo = (platformStr, linkStr = '') => {
   const p = (platformStr || '').toLowerCase();
   const l = (linkStr || '').toLowerCase();
-  
+
   if (p.includes('meet') || p.includes('google') || l.includes('meet.google')) {
     return { name: 'Google Meet', icon: 'https://upload.wikimedia.org/wikipedia/commons/9/9b/Google_Meet_icon_%282020%29.svg' };
   }
@@ -35,6 +35,9 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
   const [recordingUrl, setRecordingUrl] = useState(null);
   const [loadingRecording, setLoadingRecording] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+  const videoRef = useRef(null);
 
   useEffect(() => {
     const handleEscape = (e) => {
@@ -44,11 +47,8 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [onClose]);
 
-  // Fetch recording via backend proxy when session has a Drive file ID
-  useEffect(() => {
-    let blobUrl = null;
-    let cancelled = false;
-
+  // Fetch streaming URL from backend (returns access token + download URL)
+  const fetchRecordingUrl = useCallback(() => {
     if (!session?.id) return;
 
     // Direct URL (e.g. Zoom) — use as-is
@@ -57,55 +57,46 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
       return;
     }
 
-    // Google Drive file — proxy through backend
+    // Google Drive file — get temp token from backend, stream directly
     if (session?.recording_file_id) {
       setLoadingRecording(true);
       setLoadError(null);
+      setVideoReady(false);
 
       base44.functions.invoke('streamRecording', { sessionId: session.id })
-        .then(async (res) => {
-          if (cancelled) return;
+        .then((res) => {
           const data = res.data;
           if (!data?.success || !data?.downloadUrl || !data?.accessToken) {
             throw new Error(data?.error || 'Failed to get recording access');
           }
-
-          // Fetch video binary from Google Drive API using the temp token
-          let videoRes;
-          try {
-            videoRes = await fetch(data.downloadUrl, {
-              headers: { 'Authorization': `Bearer ${data.accessToken}` }
-            });
-          } catch (corsErr) {
-            // Fallback: use access_token as query parameter (avoids CORS header issues)
-            console.warn('Authorization header fetch failed, trying query param:', corsErr.message);
-            videoRes = await fetch(`${data.downloadUrl}&access_token=${data.accessToken}`);
-          }
-
-          if (!videoRes.ok) {
-            throw new Error(`Download failed: ${videoRes.status} ${videoRes.statusText}`);
-          }
-
-          const blob = await videoRes.blob();
-          if (cancelled) return;
-          blobUrl = URL.createObjectURL(blob);
-          setRecordingUrl(blobUrl);
+          // Use access_token as query param for direct streaming (no blob download)
+          const streamUrl = `${data.downloadUrl}&access_token=${data.accessToken}`;
+          setRecordingUrl(streamUrl);
         })
         .catch((err) => {
-          if (cancelled) return;
           console.error('Recording load failed:', err);
           setLoadError(err.message || 'Failed to load recording');
         })
         .finally(() => {
-          if (!cancelled) setLoadingRecording(false);
+          setLoadingRecording(false);
         });
     }
-
-    return () => {
-      cancelled = true;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-    };
   }, [session?.id, session?.recording_url, session?.recording_file_id]);
+
+  useEffect(() => {
+    fetchRecordingUrl();
+  }, [fetchRecordingUrl]);
+
+  // Play/pause toggle
+  const handlePlayPause = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }, []);
 
   const { effectiveStart, effectiveDuration } = React.useMemo(() => {
     let start = session?.start_datetime || session?.date_time;
@@ -115,8 +106,8 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
       duration = Math.max(1, Math.round((new Date(session.ended_at) - new Date(session.start_datetime)) / 60000));
     }
 
-    return { 
-      effectiveStart: start, 
+    return {
+      effectiveStart: start,
       effectiveDuration: duration
     };
   }, [session]);
@@ -138,11 +129,11 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
         boxShadow: 'var(--nm-shadow-main)',
       }}
     >
-      <div 
-        className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 pb-24 md:pb-8 flex flex-col" 
+      <div
+        className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 pb-24 md:pb-8 flex flex-col"
         style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
       >
-        <ViewHeader 
+        <ViewHeader
           title="Recording"
           icons={[
             {
@@ -165,7 +156,7 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
             }
           ]}
         />
-        
+
         <div className="flex flex-col gap-6 flex-1">
           <NeumorphicCard className="!px-6 !py-4 flex-1 flex flex-col">
             <div className="flex items-center gap-4">
@@ -211,7 +202,7 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
             </div>
 
 
-            
+
             <div className="flex-1 bg-black self-stretch min-h-[300px] md:min-h-[500px] -mx-6 mt-4 overflow-hidden flex items-center justify-center relative mb-4">
               {loadingRecording ? (
                 <div className="text-white opacity-70 flex flex-col items-center gap-4 p-6 text-center">
@@ -227,40 +218,71 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
                     onClick={() => {
                       setLoadError(null);
                       setRecordingUrl(null);
-                      setLoadingRecording(true);
-                      base44.functions.invoke('streamRecording', { sessionId: session.id })
-                        .then(async (res) => {
-                          const data = res.data;
-                          if (!data?.success || !data?.downloadUrl || !data?.accessToken) {
-                            throw new Error(data?.error || 'Failed to get recording access');
-                          }
-                          let videoRes;
-                          try {
-                            videoRes = await fetch(data.downloadUrl, {
-                              headers: { 'Authorization': `Bearer ${data.accessToken}` }
-                            });
-                          } catch (corsErr) {
-                            videoRes = await fetch(`${data.downloadUrl}&access_token=${data.accessToken}`);
-                          }
-                          if (!videoRes.ok) throw new Error(`Download failed: ${videoRes.status}`);
-                          const blob = await videoRes.blob();
-                          setRecordingUrl(URL.createObjectURL(blob));
-                        })
-                        .catch((err) => setLoadError(err.message || 'Failed to load recording'))
-                        .finally(() => setLoadingRecording(false));
+                      fetchRecordingUrl();
                     }}
                   >
                     Retry
                   </button>
                 </div>
               ) : recordingUrl ? (
-                <video
-                  src={recordingUrl}
-                  controls
-                  className="w-full h-full object-contain"
-                >
-                  Your browser does not support the video tag.
-                </video>
+                <>
+                  <video
+                    ref={videoRef}
+                    src={recordingUrl}
+                    controls
+                    preload="metadata"
+                    className="w-full h-full object-contain"
+                    onPlay={() => setIsPlaying(true)}
+                    onPause={() => setIsPlaying(false)}
+                    onLoadedData={() => setVideoReady(true)}
+                  >
+                    Your browser does not support the video tag.
+                  </video>
+
+                  {/* Custom play overlay */}
+                  <AnimatePresence>
+                    {!isPlaying && videoReady && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="absolute inset-0 flex items-center justify-center cursor-pointer z-10"
+                        onClick={handlePlayPause}
+                        style={{ background: 'rgba(0, 0, 0, 0.3)' }}
+                      >
+                        <div
+                          className="w-20 h-20 rounded-full flex items-center justify-center transition-transform hover:scale-110"
+                          style={{
+                            background: '#2f949d',
+                            boxShadow: '0 4px 24px rgba(47, 148, 157, 0.4)',
+                          }}
+                        >
+                          <Play className="w-9 h-9 text-white ml-1" fill="white" />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Initial play overlay before video metadata loads */}
+                  {!videoReady && (
+                    <div
+                      className="absolute inset-0 flex items-center justify-center cursor-pointer z-10"
+                      onClick={handlePlayPause}
+                      style={{ background: 'rgba(0, 0, 0, 0.3)' }}
+                    >
+                      <div
+                        className="w-20 h-20 rounded-full flex items-center justify-center"
+                        style={{
+                          background: '#2f949d',
+                          boxShadow: '0 4px 24px rgba(47, 148, 157, 0.4)',
+                        }}
+                      >
+                        <Play className="w-9 h-9 text-white ml-1" fill="white" />
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="text-white opacity-70 flex flex-col items-center gap-4 p-6 text-center">
                   <FileVideo className="w-12 h-12 mb-2 opacity-50" />
