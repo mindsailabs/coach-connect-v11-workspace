@@ -57,42 +57,39 @@ Deno.serve(async (req) => {
             return Response.json({ error: 'No recording file for this session' }, { status: 404 });
         }
 
-        // Use the service account to fetch the video binary from Drive
+        // Use the service account to get an access token
         const auth = await getImpersonatedAuth();
-        const drive = google.drive({ version: 'v3', auth });
+        await auth.authorize();
+        const accessToken = auth.credentials.access_token;
 
-        // First get file metadata to know the size and mime type
-        const fileMeta = await drive.files.get({
-            fileId,
-            fields: 'id, name, mimeType, size'
-        });
-        const mimeType = fileMeta.data.mimeType || 'video/mp4';
-        const fileSize = parseInt(fileMeta.data.size || '0', 10);
-        console.log(`Recording: ${fileMeta.data.name}, ${mimeType}, ${fileSize} bytes`);
+        // Get file metadata first
+        const metaResponse = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,size`,
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+        if (!metaResponse.ok) {
+            const metaErr = await metaResponse.text();
+            console.error('Metadata fetch error:', metaErr);
+            return Response.json({ error: 'Failed to get file metadata' }, { status: 500 });
+        }
+        const fileMeta = await metaResponse.json();
+        const mimeType = fileMeta.mimeType || 'video/mp4';
+        const fileSize = fileMeta.size ? parseInt(fileMeta.size, 10) : 0;
+        console.log(`Recording: ${fileMeta.name}, ${mimeType}, ${fileSize} bytes`);
 
-        // Download the file content as a stream
-        const response = await drive.files.get(
-            { fileId, alt: 'media' },
-            { responseType: 'stream' }
+        // Download the file binary using native fetch (Deno-compatible)
+        const downloadResponse = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
         );
 
-        // Convert the Node-style readable stream to a web ReadableStream
-        const nodeStream = response.data;
-        const webStream = new ReadableStream({
-            start(controller) {
-                nodeStream.on('data', (chunk) => {
-                    controller.enqueue(chunk);
-                });
-                nodeStream.on('end', () => {
-                    controller.close();
-                });
-                nodeStream.on('error', (err) => {
-                    controller.error(err);
-                });
-            }
-        });
+        if (!downloadResponse.ok) {
+            const dlErr = await downloadResponse.text();
+            console.error('Download error:', dlErr);
+            return Response.json({ error: 'Failed to download recording' }, { status: 500 });
+        }
 
-        // Return the video as a streaming response
+        // Return the video as a streaming response using the native fetch body
         const headers = new Headers({
             'Content-Type': mimeType,
             'Accept-Ranges': 'bytes',
@@ -102,11 +99,13 @@ Deno.serve(async (req) => {
             headers.set('Content-Length', String(fileSize));
         }
 
-        return new Response(webStream, { status: 200, headers });
+        // Pass through the readable stream from the Drive download directly
+        return new Response(downloadResponse.body, { status: 200, headers });
 
     } catch (error) {
         console.error('=== Stream Recording Error ===');
         console.error('Error:', error.message);
+        console.error('Stack:', error.stack);
         return Response.json({ error: error.message }, { status: 500 });
     }
 });
