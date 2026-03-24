@@ -234,8 +234,7 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
                     ref={videoRef}
                     src={recordingUrl}
                     controls
-                    preload="metadata"
-                    crossOrigin="anonymous"
+                    preload="auto"
                     className="w-full h-full object-contain"
                     style={{ opacity: videoReady ? 1 : 0 }}
                     onPlay={() => setIsPlaying(true)}
