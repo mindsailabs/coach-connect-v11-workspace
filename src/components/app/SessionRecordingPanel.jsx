@@ -6,7 +6,6 @@ import ViewHeader from '@/components/ui/ViewHeader';
 import NeumorphicBadge from '@/components/ui/NeumorphicBadge';
 import { formatDate, formatTime } from '@/components/utils/entityHelpers';
 import { base44 } from '@/api/base44Client';
-import { appParams } from '@/lib/app-params';
 
 const getPlatformInfo = (platformStr, linkStr = '') => {
   const p = (platformStr || '').toLowerCase();
@@ -45,9 +44,13 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [onClose]);
 
-  // Stream recording via backend proxy — no Google sign-in needed
+  // Load recording via backend proxy — no Google sign-in needed
+  // Step 1: Call streamRecording to get a temp access token + download URL
+  // Step 2: Fetch the video binary from Google Drive API using the temp token
+  // Step 3: Create a blob URL for the <video> element
   useEffect(() => {
     let blobUrl = null;
+    let cancelled = false;
 
     if (!session?.id) return;
 
@@ -57,50 +60,47 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
       return;
     }
 
-    // If there's a Drive file ID, stream it through our backend proxy
+    // If there's a Drive file ID, fetch via our proxy
     if (session?.recording_file_id) {
       setLoadingRecording(true);
       setLoadError(null);
 
-      // Build the function URL and call with fetch to get binary response
-      const { serverUrl, appId, functionsVersion } = appParams;
-      const token = localStorage.getItem('base44_access_token') || appParams.token;
-      const version = functionsVersion || 'latest';
-      const functionUrl = `${serverUrl}/api/apps/${appId}/functions/${version}/streamRecording`;
+      // Step 1: Get temp token from our backend
+      base44.functions.invoke('streamRecording', { sessionId: session.id })
+        .then(async (data) => {
+          if (cancelled) return;
+          if (!data.success || !data.downloadUrl || !data.accessToken) {
+            throw new Error(data.error || 'Failed to get recording access');
+          }
 
-      fetch(functionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({ sessionId: session.id })
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            throw new Error(errData.error || `Server error: ${res.status}`);
+          // Step 2: Fetch video binary from Google Drive using the temp token
+          const videoRes = await fetch(data.downloadUrl, {
+            headers: { 'Authorization': `Bearer ${data.accessToken}` }
+          });
+
+          if (!videoRes.ok) {
+            throw new Error(`Failed to download video: ${videoRes.status}`);
           }
-          const contentType = res.headers.get('content-type') || '';
-          if (contentType.startsWith('video/') || contentType.startsWith('application/octet-stream')) {
-            const blob = await res.blob();
-            blobUrl = URL.createObjectURL(blob);
-            setRecordingUrl(blobUrl);
-          } else {
-            // Unexpected JSON response (maybe error)
-            const data = await res.json().catch(() => ({}));
-            throw new Error(data.error || 'Unexpected response type');
-          }
+
+          // Step 3: Create blob URL
+          const blob = await videoRes.blob();
+          if (cancelled) return;
+          blobUrl = URL.createObjectURL(blob);
+          setRecordingUrl(blobUrl);
         })
         .catch((err) => {
-          console.error('Failed to stream recording:', err);
+          if (cancelled) return;
+          console.error('Failed to load recording:', err);
           setLoadError(err.message || 'Failed to load recording. Please try again.');
         })
-        .finally(() => setLoadingRecording(false));
+        .finally(() => {
+          if (!cancelled) setLoadingRecording(false);
+        });
     }
 
     // Cleanup blob URL on unmount
     return () => {
+      cancelled = true;
       if (blobUrl) {
         URL.revokeObjectURL(blobUrl);
       }

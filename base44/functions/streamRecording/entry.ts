@@ -57,50 +57,42 @@ Deno.serve(async (req) => {
             return Response.json({ error: 'No recording file for this session' }, { status: 404 });
         }
 
-        // Use the service account to get an access token
+        // Get a short-lived access token from the service account
         const auth = await getImpersonatedAuth();
-        await auth.authorize();
-        const accessToken = auth.credentials.access_token;
+        const tokenResponse = await auth.authorize();
+        const accessToken = tokenResponse?.access_token || auth.credentials?.access_token;
 
-        // Get file metadata first
+        if (!accessToken) {
+            console.error('Failed to get access token');
+            return Response.json({ error: 'Authentication failed' }, { status: 500 });
+        }
+
+        // Verify the file exists and get metadata
         const metaResponse = await fetch(
             `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,size`,
             { headers: { 'Authorization': `Bearer ${accessToken}` } }
         );
+
         if (!metaResponse.ok) {
             const metaErr = await metaResponse.text();
-            console.error('Metadata fetch error:', metaErr);
-            return Response.json({ error: 'Failed to get file metadata' }, { status: 500 });
+            console.error('File metadata error:', metaErr);
+            return Response.json({ error: 'Recording file not found in Drive' }, { status: 404 });
         }
+
         const fileMeta = await metaResponse.json();
-        const mimeType = fileMeta.mimeType || 'video/mp4';
-        const fileSize = fileMeta.size ? parseInt(fileMeta.size, 10) : 0;
-        console.log(`Recording: ${fileMeta.name}, ${mimeType}, ${fileSize} bytes`);
+        console.log(`Recording verified: ${fileMeta.name}, ${fileMeta.mimeType}, ${fileMeta.size} bytes`);
 
-        // Download the file binary using native fetch (Deno-compatible)
-        const downloadResponse = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-            { headers: { 'Authorization': `Bearer ${accessToken}` } }
-        );
-
-        if (!downloadResponse.ok) {
-            const dlErr = await downloadResponse.text();
-            console.error('Download error:', dlErr);
-            return Response.json({ error: 'Failed to download recording' }, { status: 500 });
-        }
-
-        // Return the video as a streaming response using the native fetch body
-        const headers = new Headers({
-            'Content-Type': mimeType,
-            'Accept-Ranges': 'bytes',
-            'Cache-Control': 'private, max-age=3600',
+        // Return the download URL and temporary access token
+        // The frontend will use these to fetch the video directly from Google's API
+        // Token is short-lived (~1 hour) and scoped to drive.readonly
+        return Response.json({
+            success: true,
+            downloadUrl: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+            accessToken: accessToken,
+            mimeType: fileMeta.mimeType || 'video/mp4',
+            fileSize: parseInt(fileMeta.size || '0', 10),
+            fileName: fileMeta.name
         });
-        if (fileSize > 0) {
-            headers.set('Content-Length', String(fileSize));
-        }
-
-        // Pass through the readable stream from the Drive download directly
-        return new Response(downloadResponse.body, { status: 200, headers });
 
     } catch (error) {
         console.error('=== Stream Recording Error ===');
