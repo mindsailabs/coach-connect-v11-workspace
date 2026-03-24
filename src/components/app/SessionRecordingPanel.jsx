@@ -37,6 +37,7 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
   const [loadError, setLoadError] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
+  const [videoError, setVideoError] = useState(null);
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -92,7 +93,10 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
-      video.play().catch(() => {});
+      video.play().catch((err) => {
+        console.error('Play failed:', err);
+        setVideoError('Unable to play video. The recording may still be loading.');
+      });
     } else {
       video.pause();
     }
@@ -231,26 +235,57 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
                     src={recordingUrl}
                     controls
                     preload="metadata"
+                    crossOrigin="anonymous"
                     className="w-full h-full object-contain"
+                    style={{ opacity: videoReady ? 1 : 0 }}
                     onPlay={() => setIsPlaying(true)}
                     onPause={() => setIsPlaying(false)}
                     onLoadedData={() => setVideoReady(true)}
+                    onCanPlay={() => setVideoReady(true)}
+                    onError={(e) => {
+                      console.error('Video element error:', e.target.error);
+                      setVideoError('Failed to load video. The recording may not be accessible.');
+                    }}
                   >
                     Your browser does not support the video tag.
                   </video>
 
-                  {/* Custom play overlay */}
-                  <AnimatePresence>
-                    {!isPlaying && videoReady && (
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="absolute inset-0 flex items-center justify-center cursor-pointer z-10"
-                        onClick={handlePlayPause}
-                        style={{ background: 'rgba(0, 0, 0, 0.3)' }}
-                      >
+                  {/* Video error state */}
+                  {videoError && (
+                    <div className="absolute inset-0 flex items-center justify-center z-20 bg-black">
+                      <div className="text-white opacity-70 flex flex-col items-center gap-4 p-6 text-center">
+                        <FileVideo className="w-12 h-12 mb-2 opacity-50" />
+                        <p>{videoError}</p>
+                        <button
+                          className="mt-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
+                          onClick={() => {
+                            setVideoError(null);
+                            setRecordingUrl(null);
+                            setVideoReady(false);
+                            fetchRecordingUrl();
+                          }}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Play overlay — solid black bg before video loads, semi-transparent after */}
+                  {!isPlaying && !videoError && (
+                    <motion.div
+                      initial={{ opacity: 1 }}
+                      animate={{ opacity: 1 }}
+                      className="absolute inset-0 flex items-center justify-center cursor-pointer z-10"
+                      onClick={handlePlayPause}
+                      style={{ background: videoReady ? 'rgba(0, 0, 0, 0.35)' : '#000' }}
+                    >
+                      {!videoReady ? (
+                        <div className="flex flex-col items-center gap-4">
+                          <Loader2 className="w-8 h-8 animate-spin text-white opacity-50" />
+                          <p className="text-white opacity-50 text-sm">Preparing video...</p>
+                        </div>
+                      ) : (
                         <div
                           className="w-20 h-20 rounded-full flex items-center justify-center transition-transform hover:scale-110"
                           style={{
@@ -260,27 +295,8 @@ export default function SessionRecordingPanel({ session, contact, onClose }) {
                         >
                           <Play className="w-9 h-9 text-white ml-1" fill="white" />
                         </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* Initial play overlay before video metadata loads */}
-                  {!videoReady && (
-                    <div
-                      className="absolute inset-0 flex items-center justify-center cursor-pointer z-10"
-                      onClick={handlePlayPause}
-                      style={{ background: 'rgba(0, 0, 0, 0.3)' }}
-                    >
-                      <div
-                        className="w-20 h-20 rounded-full flex items-center justify-center"
-                        style={{
-                          background: '#2f949d',
-                          boxShadow: '0 4px 24px rgba(47, 148, 157, 0.4)',
-                        }}
-                      >
-                        <Play className="w-9 h-9 text-white ml-1" fill="white" />
-                      </div>
-                    </div>
+                      )}
+                    </motion.div>
                   )}
                 </>
               ) : (
