@@ -300,13 +300,10 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
         pendingSpeaker = null;
         const speaker = inlineMatch[1].trim();
         const spokenText = inlineMatch[2].trim();
-        if (speaker === lastSpeaker && lastTimestamp) {
-          lastText += ' ' + spokenText;
-        } else {
-          pushEntry();
-          lastSpeaker = speaker;
-          lastText = spokenText;
-        }
+        pushEntry();
+        lastSpeaker = speaker;
+        lastText = spokenText;
+        // lastTimestamp already holds the most recently seen standalone timestamp
         continue;
       }
 
