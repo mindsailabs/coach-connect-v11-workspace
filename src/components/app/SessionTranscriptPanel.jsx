@@ -245,34 +245,32 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
     if ((text.match(/^\[\d{2}:\d{2}:\d{2}\]/gm) || []).length > 2) return text;
 
     const lines = text.split('\n');
-    const normalizedLines = [];
 
     const isStandaloneTimestamp = (s) => /^\d{1,2}:\d{2}(:\d{2})?$/.test(s.trim());
 
-    const formatTs = (ts) => {
-      const t = ts.trim();
-      const parts = t.split(':');
-      if (parts.length === 2) return `00:${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
-      if (parts.length === 3) return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}:${parts[2].padStart(2, '0')}`;
-      return '00:00:00';
+    const tsToSeconds = (ts) => {
+      const parts = ts.trim().split(':').map(Number);
+      if (parts.length === 2) return parts[0] * 60 + parts[1];
+      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      return 0;
     };
 
-    // Handles two formats:
-    // Format A (inline): "SpeakerName: spoken text" after a standalone timestamp
-    // Format B (split):  "SpeakerName" alone on a line, then standalone timestamp, then "spoken text" line(s)
+    const secondsToTs = (s) => {
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = Math.floor(s % 60);
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    };
 
-    let lastSpeaker = null;
-    let lastTimestamp = null;   // most recently seen standalone timestamp
-    let entryTimestamp = null;  // timestamp assigned to the current buffered entry
-    let lastText = null;
-    let pendingSpeaker = null; // speaker name seen before a timestamp (Format B)
+    // --- Pass 1: collect raw entries as { sectionTs, speaker, text } ---
+    // Format A (inline): standalone timestamp, then "Speaker: text" lines (section-based, Format C)
+    // Format B (split):  "SpeakerName" alone, then standalone timestamp, then text
+    const rawEntries = []; // { sectionTs (seconds), speaker, text }
+    let currentSectionTs = 0;
     let foundFirstTimestamp = false;
-
-    const pushEntry = () => {
-      if (lastSpeaker && lastText) {
-        normalizedLines.push(`[${formatTs(entryTimestamp || lastTimestamp || '0:00')}] ${lastSpeaker}: ${lastText}`);
-      }
-    };
+    let pendingSpeaker = null;
+    let lastSpeaker = null;
+    let lastEntryIdx = -1; // index into rawEntries for current buffered entry
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
@@ -280,56 +278,88 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
 
       if (isStandaloneTimestamp(line)) {
         foundFirstTimestamp = true;
-        lastTimestamp = line;
+        currentSectionTs = tsToSeconds(line);
+        lastEntryIdx = -1; // new section resets continuation
         continue;
       }
 
       if (!foundFirstTimestamp) {
-        if (!/[:]/.test(line)) {
-          pendingSpeaker = line;
-        }
+        if (!/[:]/.test(line)) pendingSpeaker = line;
         continue;
       }
 
-      // Check if this line is "SpeakerName: text" (Format A)
+      // Format A/C: "Speaker: text"
       const inlineMatch = line.match(/^([^:]+):\s+(.+)$/);
       if (inlineMatch) {
         pendingSpeaker = null;
-        pushEntry();
-        lastSpeaker = inlineMatch[1].trim();
-        lastText = inlineMatch[2].trim();
-        entryTimestamp = lastTimestamp;
+        const speaker = inlineMatch[1].trim();
+        const spokenText = inlineMatch[2].trim();
+        // Same speaker continuing in same section → append
+        if (lastEntryIdx >= 0 && rawEntries[lastEntryIdx].speaker === speaker && rawEntries[lastEntryIdx].sectionTs === currentSectionTs) {
+          rawEntries[lastEntryIdx].text += ' ' + spokenText;
+        } else {
+          rawEntries.push({ sectionTs: currentSectionTs, speaker, text: spokenText });
+          lastEntryIdx = rawEntries.length - 1;
+        }
+        lastSpeaker = speaker;
         continue;
       }
 
-      // Plain text line — could be Format B text after a speaker+timestamp
-      // Or a speaker name before the next timestamp
+      // Format B: plain text after a speaker+timestamp
       const isLikelySpeakerName = !/[.!?,]/.test(line) && line.split(' ').length <= 4;
-
       if (isLikelySpeakerName && !pendingSpeaker) {
         pendingSpeaker = line;
         continue;
       }
 
-      // It's spoken text
       const speaker = pendingSpeaker || lastSpeaker;
       pendingSpeaker = null;
       if (!speaker) continue;
 
-      // Same speaker AND same timestamp = continuation of same utterance
-      if (speaker === lastSpeaker && lastTimestamp === entryTimestamp) {
-        lastText += ' ' + line;
+      if (lastEntryIdx >= 0 && rawEntries[lastEntryIdx].speaker === speaker && rawEntries[lastEntryIdx].sectionTs === currentSectionTs) {
+        rawEntries[lastEntryIdx].text += ' ' + line;
       } else {
-        pushEntry();
-        lastSpeaker = speaker;
-        lastText = line;
-        entryTimestamp = lastTimestamp;
+        rawEntries.push({ sectionTs: currentSectionTs, speaker, text: line });
+        lastEntryIdx = rawEntries.length - 1;
       }
+      lastSpeaker = speaker;
     }
 
-    pushEntry();
+    if (rawEntries.length === 0) return text;
 
-    return normalizedLines.length > 0 ? normalizedLines.join('\n') : text;
+    // --- Pass 2: interpolate timestamps within each section ---
+    // Group entries by section, then spread timestamps evenly between section start and next section start
+    // Find section boundaries
+    const sectionStarts = [...new Set(rawEntries.map(e => e.sectionTs))].sort((a, b) => a - b);
+    // Estimate end of last section: use +60s as fallback
+    const lastSectionEnd = sectionStarts.length > 1
+      ? sectionStarts[sectionStarts.length - 1] + (sectionStarts[sectionStarts.length - 1] - sectionStarts[sectionStarts.length - 2])
+      : sectionStarts[0] + 60;
+
+    const sectionEndMap = {};
+    for (let i = 0; i < sectionStarts.length; i++) {
+      sectionEndMap[sectionStarts[i]] = i < sectionStarts.length - 1 ? sectionStarts[i + 1] : lastSectionEnd;
+    }
+
+    // For each section, distribute entries evenly
+    const normalizedLines = [];
+    const sectionGroups = {};
+    for (const entry of rawEntries) {
+      if (!sectionGroups[entry.sectionTs]) sectionGroups[entry.sectionTs] = [];
+      sectionGroups[entry.sectionTs].push(entry);
+    }
+
+    for (const secTs of sectionStarts) {
+      const group = sectionGroups[secTs];
+      const sectionEnd = sectionEndMap[secTs];
+      const duration = sectionEnd - secTs;
+      group.forEach((entry, idx) => {
+        const interpolated = secTs + Math.round((idx / group.length) * duration);
+        normalizedLines.push(`[${secondsToTs(interpolated)}] ${entry.speaker}: ${entry.text}`);
+      });
+    }
+
+    return normalizedLines.join('\n');
   };
 
   const activeTranscript = normalizeTranscript(transcriptContent || demoTranscript);
