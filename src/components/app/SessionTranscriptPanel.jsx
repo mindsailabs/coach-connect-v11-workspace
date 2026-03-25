@@ -571,7 +571,14 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
                          <span className="text-xs font-semibold" style={{ color: isCoach ? 'var(--nm-badge-primary-color)' : 'var(--nm-badge-info-color)' }}>
                            {speaker}
                          </span>
-                         <span className="text-[10px]" style={{ color: 'var(--nm-badge-default-color)' }}>{timestamp}</span>
+                         <span className="text-[10px]" style={{ color: 'var(--nm-badge-default-color)' }}>
+                           {(() => {
+                             const t = timestamp.replace(/[\[\]]/g, '');
+                             const [h, m, s] = t.split(':').map(Number);
+                             if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+                             return `${m}:${String(s).padStart(2,'0')}`;
+                           })()}
+                         </span>
                        </div>
                        <div 
                          className="group relative px-4 pt-3 pb-8 text-sm max-w-[85%] rounded-2xl leading-relaxed"
