@@ -262,14 +262,15 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
     // Format B (split):  "SpeakerName" alone on a line, then standalone timestamp, then "spoken text" line(s)
 
     let lastSpeaker = null;
-    let lastTimestamp = null;
+    let lastTimestamp = null;   // most recently seen standalone timestamp
+    let entryTimestamp = null;  // timestamp assigned to the current buffered entry
     let lastText = null;
     let pendingSpeaker = null; // speaker name seen before a timestamp (Format B)
     let foundFirstTimestamp = false;
 
     const pushEntry = () => {
       if (lastSpeaker && lastText) {
-        normalizedLines.push(`[${formatTs(lastTimestamp)}] ${lastSpeaker}: ${lastText}`);
+        normalizedLines.push(`[${formatTs(entryTimestamp || lastTimestamp || '0:00')}] ${lastSpeaker}: ${lastText}`);
       }
     };
 
@@ -279,15 +280,11 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
 
       if (isStandaloneTimestamp(line)) {
         foundFirstTimestamp = true;
-        // In Format B, speaker came before this timestamp — store it as pending
-        // (pendingSpeaker is already set from the line before this)
         lastTimestamp = line;
         continue;
       }
 
       if (!foundFirstTimestamp) {
-        // Check if this could be a speaker name (no colon, not a timestamp)
-        // Store as pending in case Format B applies
         if (!/[:]/.test(line)) {
           pendingSpeaker = line;
         }
@@ -298,12 +295,10 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
       const inlineMatch = line.match(/^([^:]+):\s+(.+)$/);
       if (inlineMatch) {
         pendingSpeaker = null;
-        const speaker = inlineMatch[1].trim();
-        const spokenText = inlineMatch[2].trim();
         pushEntry();
-        lastSpeaker = speaker;
-        lastText = spokenText;
-        // lastTimestamp already holds the most recently seen standalone timestamp
+        lastSpeaker = inlineMatch[1].trim();
+        lastText = inlineMatch[2].trim();
+        entryTimestamp = lastTimestamp;
         continue;
       }
 
@@ -312,7 +307,6 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
       const isLikelySpeakerName = !/[.!?,]/.test(line) && line.split(' ').length <= 4;
 
       if (isLikelySpeakerName && !pendingSpeaker) {
-        // Treat as a speaker name for the next Format B block
         pendingSpeaker = line;
         continue;
       }
@@ -322,12 +316,14 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
       pendingSpeaker = null;
       if (!speaker) continue;
 
-      if (speaker === lastSpeaker && lastTimestamp) {
+      // Same speaker AND same timestamp = continuation of same utterance
+      if (speaker === lastSpeaker && lastTimestamp === entryTimestamp) {
         lastText += ' ' + line;
       } else {
         pushEntry();
         lastSpeaker = speaker;
         lastText = line;
+        entryTimestamp = lastTimestamp;
       }
     }
 
