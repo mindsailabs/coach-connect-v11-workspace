@@ -56,39 +56,42 @@ function cleanContent(text) {
 function extractNotesAndTranscript(plainText) {
     const lines = plainText.split('\n');
 
-    // Google Meet Gemini Notes doc structure:
-    // [header: 📝 Notes, date, meeting title]
-    // Summary
-    // [summary paragraph]
-    // Details
-    // * bullet (timestamp)
-    // * bullet (timestamp)
-    // [blank]
-    // [ACTUAL TRANSCRIPT STARTS HERE]
-    // Speaker Name
-    // 0:00
-    // spoken text
-    // Speaker Name
-    // 0:05
-    // spoken text ...
-
-    // The raw per-speaker transcript starts after the Details section.
-    // We detect it by finding a standalone timestamp line (e.g. "0:00" or "0:05:30")
-    // that is preceded by a non-bullet, non-header speaker name line.
+    // Detects standalone short timestamps: "0:00", "1:23", "0:00:00", "1:23:45"
     const isStandaloneTimestamp = (s) => /^\d{1,2}:\d{2}(:\d{2})?$/.test(s.trim());
+    // Detects section-header timestamps (HH:MM:SS at start of a section): "00:00:00", "00:00:58"
+    const isSectionTimestamp = (s) => /^\d{2}:\d{2}:\d{2}$/.test(s.trim());
     const isBulletLine = (s) => /^\*\s/.test(s.trim());
+    const isSpeakerLine = (s) => /^[A-Za-z].+:\s*.+$/.test(s.trim()); // "Speaker: text"
 
-    // Find the first standalone timestamp that is NOT inside a bullet point
-    let transcriptStartIdx = -1;
+    // --- Detect transcript format ---
+
+    // Format C: Section-based — HH:MM:SS header, then multiple "Speaker: text" lines
+    // e.g. "00:00:00\n \nMindsai Media: Yes.\nA S: Hello\n\n00:00:58\n \nA S: ..."
+    // Detect by finding a line that is a section timestamp (HH:MM:SS) followed eventually by Speaker: text lines
+    let formatCSectionStart = -1;
+    for (let i = 0; i < lines.length; i++) {
+        if (isSectionTimestamp(lines[i].trim())) {
+            // Check that at least one of the next few lines is a speaker line
+            for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+                if (isSpeakerLine(lines[j].trim())) {
+                    formatCSectionStart = i;
+                    break;
+                }
+            }
+            if (formatCSectionStart !== -1) break;
+        }
+    }
+
+    // Format B: Speaker name alone, then standalone timestamp, then text
+    // Find the first standalone timestamp NOT inside a bullet point
+    let formatBTranscriptStart = -1;
     for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (isStandaloneTimestamp(line)) {
-            // Make sure the previous non-empty line is a speaker name (not a bullet)
             let prevIdx = i - 1;
             while (prevIdx >= 0 && !lines[prevIdx].trim()) prevIdx--;
             if (prevIdx >= 0 && !isBulletLine(lines[prevIdx]) && lines[prevIdx].trim().length > 0) {
-                // This looks like a real speaker/timestamp pair — start of transcript
-                transcriptStartIdx = Math.max(0, prevIdx);
+                formatBTranscriptStart = Math.max(0, prevIdx);
                 break;
             }
         }
@@ -101,12 +104,20 @@ function extractNotesAndTranscript(plainText) {
         if (l === 'summary' || l === 'summary:') { summaryIdx = i; break; }
     }
 
+    // Prefer Format C if detected
+    let transcriptStartIdx = -1;
+    if (formatCSectionStart !== -1) {
+        transcriptStartIdx = formatCSectionStart;
+    } else if (formatBTranscriptStart !== -1) {
+        transcriptStartIdx = formatBTranscriptStart;
+    }
+
     const notesEndIdx = transcriptStartIdx !== -1 ? transcriptStartIdx : lines.length;
     const notesText = summaryIdx !== -1
         ? cleanContent(lines.slice(summaryIdx, notesEndIdx).join('\n'))
         : '';
     const transcriptText = transcriptStartIdx !== -1
-        ? lines.slice(transcriptStartIdx).join('\n')  // keep raw, normalizer handles cleanup
+        ? lines.slice(transcriptStartIdx).join('\n')
         : '';
 
     return { notesText, transcriptText };
