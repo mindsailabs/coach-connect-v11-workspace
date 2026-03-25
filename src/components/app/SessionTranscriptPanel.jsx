@@ -576,7 +576,7 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
                              const t = timestamp.replace(/[\[\]]/g, '');
                              const [h, m, s] = t.split(':').map(Number);
                              if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-                             return `${m}:${String(s).padStart(2,'0')}`;
+                             return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
                            })()}
                          </span>
                        </div>
