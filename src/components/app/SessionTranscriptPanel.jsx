@@ -574,31 +574,36 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
 
                    return (
                      <div key={idx} className={`flex flex-col ${isCoach ? 'items-start' : 'items-end'}`}>
-                       <div className={`flex items-baseline gap-2 mb-1 ${isCoach ? 'flex-row' : 'flex-row-reverse'}`}>
-                         <span className="text-xs font-semibold" style={{ color: isCoach ? 'var(--nm-badge-primary-color)' : 'var(--nm-badge-info-color)' }}>
-                           {speaker}
-                         </span>
-                         <span className="text-[10px]" style={{ color: 'var(--nm-badge-default-color)' }}>{timestamp}</span>
-                       </div>
                        <div 
-                         className="group relative px-4 pt-3 pb-8 text-sm max-w-[85%] rounded-2xl leading-relaxed shadow-sm"
-                        style={{
+                         className="group relative max-w-[85%] rounded-2xl text-sm leading-relaxed shadow-sm overflow-visible"
+                         style={{
                            background: isCoach ? 'var(--nm-background)' : '#4299e115',
                            boxShadow: isCoach ? 'var(--nm-shadow-main)' : 'inset 1px 1px 3px rgba(255,255,255,0.4), inset -1px -1px 3px rgba(0,0,0,0.05)',
                            border: isCoach ? '1px solid rgba(255,255,255,0.5)' : '1px solid rgba(66, 153, 225, 0.2)',
                            borderBottomLeftRadius: isCoach ? '4px' : '16px',
                            borderBottomRightRadius: !isCoach ? '4px' : '16px',
                          }}
-                        >
-                         {isContinuation && (
-                           <span className="text-sm opacity-30 mr-1" style={{ color: 'var(--nm-badge-default-color)' }}>...</span>
-                         )}
-                         {renderTextWithGuardian(text, timestamp, searchTerm)}
-                         {isInterrupted && (
-                           <span className="text-sm opacity-30 ml-1" style={{ color: 'var(--nm-badge-default-color)' }}>...</span>
-                         )}
-                        
-                        <div className="absolute bottom-2 right-3 flex items-center gap-1 z-10">
+                       >
+                         {/* Speaker + timestamp header — always on top */}
+                         <div className={`relative z-20 flex items-baseline gap-2 px-4 pt-3 pb-1 ${isCoach ? 'flex-row' : 'flex-row-reverse'}`}>
+                           <span className="text-xs font-semibold" style={{ color: isCoach ? 'var(--nm-badge-primary-color)' : 'var(--nm-badge-info-color)' }}>
+                             {speaker}
+                           </span>
+                           <span className="text-[10px]" style={{ color: 'var(--nm-badge-default-color)' }}>{timestamp}</span>
+                         </div>
+
+                         {/* Message body */}
+                         <div className="relative z-10 px-4 pb-9">
+                          {isContinuation && (
+                            <span className="text-sm opacity-30 mr-1" style={{ color: 'var(--nm-badge-default-color)' }}>...</span>
+                          )}
+                          {renderTextWithGuardian(text, timestamp, searchTerm)}
+                          {isInterrupted && (
+                            <span className="text-sm opacity-30 ml-1" style={{ color: 'var(--nm-badge-default-color)' }}>...</span>
+                          )}
+                         </div>
+
+                         <div className="absolute bottom-2 right-3 flex items-center gap-1 z-30">
                           {isGuardianActive && outOfScopeAlerts[timestamp] && (
                             <>
                               <div 
@@ -659,10 +664,10 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
                           >
                             <MoreVertical className="w-3.5 h-3.5" />
                           </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
+                          </div>
+                          </div>
+                          </div>
+                          );
                 }
                 
                 return (
