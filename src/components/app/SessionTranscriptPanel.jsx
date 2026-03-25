@@ -348,16 +348,8 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
       .filter(Boolean)
   )];
   const speakerCount = speakerList.length;
-  // Identify coach: the speaker whose name does NOT match the contact's name.
-  // If contact name matches a speaker, that speaker is the client; all others are the coach.
-  const contactName = (contact?.full_name || '').toLowerCase().trim();
-  const isCoachSpeaker = (speaker) => {
-    if (speaker.toLowerCase().includes('coach')) return true;
-    if (!contactName) return false; // can't determine, treat no-match as unknown
-    // If contact name words appear in speaker name, they're the client (not coach)
-    const nameWords = contactName.split(' ').filter(w => w.length > 1);
-    return !nameWords.some(w => speaker.toLowerCase().includes(w));
-  };
+  // Alternate cards by speaker: first unique speaker = left, second = right
+  const isCoachSpeaker = (speaker) => speakerList.indexOf(speaker) === 0;
   
   const { effectiveStart, effectiveDuration } = React.useMemo(() => {
     const start = session?.start_datetime || session?.date_time;
