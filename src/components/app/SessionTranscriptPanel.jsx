@@ -327,39 +327,8 @@ export default function SessionTranscriptPanel({ session, contact, onClose }) {
 
     if (rawEntries.length === 0) return text;
 
-    // --- Pass 2: interpolate timestamps within each section ---
-    // Group entries by section, then spread timestamps evenly between section start and next section start
-    // Find section boundaries
-    const sectionStarts = [...new Set(rawEntries.map(e => e.sectionTs))].sort((a, b) => a - b);
-    // Estimate end of last section: use +60s as fallback
-    const lastSectionEnd = sectionStarts.length > 1
-      ? sectionStarts[sectionStarts.length - 1] + (sectionStarts[sectionStarts.length - 1] - sectionStarts[sectionStarts.length - 2])
-      : sectionStarts[0] + 60;
-
-    const sectionEndMap = {};
-    for (let i = 0; i < sectionStarts.length; i++) {
-      sectionEndMap[sectionStarts[i]] = i < sectionStarts.length - 1 ? sectionStarts[i + 1] : lastSectionEnd;
-    }
-
-    // For each section, distribute entries evenly
-    const normalizedLines = [];
-    const sectionGroups = {};
-    for (const entry of rawEntries) {
-      if (!sectionGroups[entry.sectionTs]) sectionGroups[entry.sectionTs] = [];
-      sectionGroups[entry.sectionTs].push(entry);
-    }
-
-    for (const secTs of sectionStarts) {
-      const group = sectionGroups[secTs];
-      const sectionEnd = sectionEndMap[secTs];
-      const duration = sectionEnd - secTs;
-      group.forEach((entry, idx) => {
-        const interpolated = secTs + Math.round((idx / group.length) * duration);
-        normalizedLines.push(`[${secondsToTs(interpolated)}] ${entry.speaker}: ${entry.text}`);
-      });
-    }
-
-    return normalizedLines.join('\n');
+    // Use the section timestamp as-is for all entries in that section — it's the actual recorded time
+    return rawEntries.map(e => `[${secondsToTs(e.sectionTs)}] ${e.speaker}: ${e.text}`).join('\n');
   };
 
   const activeTranscript = normalizeTranscript(transcriptContent || demoTranscript);
