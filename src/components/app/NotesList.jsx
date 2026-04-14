@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { StickyNote, Pin, Plus, User, Calendar, Map, CheckSquare } from 'lucide-react';
+import { StickyNote, Pin, User, Calendar, Map, CheckSquare, ChevronRight } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { Note, Contact, Session, ContactJourney, Journey, Task } from '@/components/api/entities';
+import { Note, Contact, Session, Journey, Task } from '@/components/api/entities';
 import NeumorphicCard from '@/components/ui/NeumorphicCard';
 import NeumorphicBadge from '@/components/ui/NeumorphicBadge';
 import { formatDate } from '@/components/utils/entityHelpers';
 import NoteDetailPanel from '@/components/app/NoteDetailPanel';
-import NeumorphicSkeleton from '@/components/ui/NeumorphicSkeleton';
+import { NeumorphicListSkeleton } from '@/components/ui/NeumorphicSkeleton';
 import ListToolbar from '@/components/app/ListToolbar';
+import ContactSelectionPanel from '@/components/app/ContactSelectionPanel';
 
 const NOTE_TYPE_ICONS = {
   'My Note': StickyNote,
@@ -17,19 +18,22 @@ const NOTE_TYPE_ICONS = {
   'Task Note': CheckSquare,
 };
 
-const NOTE_TYPE_COLORS = {
-  'My Note': '#8b5cf6',
-  'Contact Note': '#2f949d',
-  'Session Note': '#ed8936',
-  'Journey Note': '#ec4899',
-  'Task Note': '#4299e1',
+const NOTE_TYPE_VARIANTS = {
+  'My Note': 'checkin',
+  'Contact Note': 'primary',
+  'Session Note': 'warning',
+  'Journey Note': 'learning',
+  'Task Note': 'info',
 };
 
 export default function NotesList() {
   const [showCreateNote, setShowCreateNote] = useState(false);
+  const [selectedNote, setSelectedNote] = useState(null);
   const [selectedNoteType, setSelectedNoteType] = useState('All');
   const [searchValue, setSearchValue] = useState('');
   const [showFilter, setShowFilter] = useState(false);
+  const [contactFilter, setContactFilter] = useState(null);
+  const [showContactFilterPanel, setShowContactFilterPanel] = useState(false);
 
   // Fetch notes
   const { data: notesData, isLoading, error } = useQuery({
@@ -37,7 +41,6 @@ export default function NotesList() {
     queryFn: () => Note.list(),
   });
 
-  // Fetch related entities for display
   const { data: contactsData } = useQuery({
     queryKey: ['contacts'],
     queryFn: () => Contact.list(),
@@ -58,16 +61,20 @@ export default function NotesList() {
     queryFn: () => Task.list(),
   });
 
-  // Process notes with linked entity names
+  // Process notes with linked entity info
   const notes = (notesData || []).map(note => {
     let linkedName = null;
-    
+    let linkedContactId = null;
+
     if (note.linkedContact) {
       const contact = (contactsData || []).find(c => c.id === note.linkedContact);
       linkedName = contact?.full_name;
+      linkedContactId = note.linkedContact;
     } else if (note.linkedSession) {
       const session = (sessionsData || []).find(s => s.id === note.linkedSession);
       linkedName = session?.title || 'Session';
+      // Also get the contact from the session for contact filtering
+      if (session?.contact_id) linkedContactId = session.contact_id;
     } else if (note.linkedJourney) {
       const journey = (journeysData || []).find(j => j.id === note.linkedJourney);
       linkedName = journey?.title;
@@ -79,49 +86,41 @@ export default function NotesList() {
     return {
       ...note,
       linkedName,
+      linkedContactId,
     };
   }).sort((a, b) => {
-    // Pinned first, then by creation date
     if (a.isPinned && !b.isPinned) return -1;
     if (!a.isPinned && b.isPinned) return 1;
     return new Date(b.created_date || 0) - new Date(a.created_date || 0);
   });
 
   // Filter by type
-  let filteredNotes = selectedNoteType === 'All' 
-    ? notes 
+  let filteredNotes = selectedNoteType === 'All'
+    ? notes
     : notes.filter(n => n.noteType === selectedNoteType);
+
+  // Contact filter
+  if (contactFilter) {
+    filteredNotes = filteredNotes.filter(n => n.linkedContactId === contactFilter.id);
+  }
 
   // Search filter
   if (searchValue.trim()) {
     const q = searchValue.toLowerCase();
-    filteredNotes = filteredNotes.filter(n => 
-      (n.title || '').toLowerCase().includes(q) || 
-      (n.content || '').toLowerCase().includes(q) || 
+    filteredNotes = filteredNotes.filter(n =>
+      (n.title || '').toLowerCase().includes(q) ||
+      (n.content || '').toLowerCase().includes(q) ||
       (n.linkedName || '').toLowerCase().includes(q)
     );
   }
 
+  const pinnedNotes = filteredNotes.filter(n => n.isPinned);
+  const otherNotes = filteredNotes.filter(n => !n.isPinned);
+
   const filterStates = ['All', 'My Note', 'Contact Note', 'Session Note', 'Journey Note', 'Task Note'];
   const filterColors = ['default', 'checkin', 'primary', 'warning', 'learning', 'info'];
 
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <NeumorphicCard key={i} className="space-y-3">
-            <div className="flex items-center gap-2">
-              <NeumorphicSkeleton width="w-8" height="h-8" />
-              <NeumorphicSkeleton width="w-24" height="h-4" />
-            </div>
-            <NeumorphicSkeleton width="w-full" height="h-4" />
-            <NeumorphicSkeleton width="w-3/4" height="h-3" />
-            <NeumorphicSkeleton width="w-full" height="h-3" />
-          </NeumorphicCard>
-        ))}
-      </div>
-    );
-  }
+  if (isLoading) return <NeumorphicListSkeleton itemCount={5} />;
 
   if (error) {
     return (
@@ -130,6 +129,61 @@ export default function NotesList() {
       </NeumorphicCard>
     );
   }
+
+  const renderNote = (note) => {
+    const Icon = NOTE_TYPE_ICONS[note.noteType] || StickyNote;
+    const typeVariant = NOTE_TYPE_VARIANTS[note.noteType] || 'checkin';
+
+    const dateObj = note.created_date ? new Date(note.created_date) : null;
+    const dayStr = dateObj ? dateObj.getDate() : '--';
+    const monthStr = dateObj ? dateObj.toLocaleDateString('en-GB', { month: 'short' }) : '---';
+
+    return (
+      <NeumorphicCard
+        key={note.id}
+        className="!px-6 !py-4 transition-all duration-200"
+        clickable
+        onClick={() => setSelectedNote(note)}
+      >
+        <div className="flex items-center gap-4">
+          {/* Date badge — mirrors sessions day/month icon */}
+          <div className="relative flex-shrink-0">
+            <div className="neumorphic-icon-badge md flex-col gap-0">
+              <span className="text-lg font-bold leading-none" style={{ color: 'var(--nm-text-color)' }}>{dayStr}</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider leading-none" style={{ color: 'var(--nm-badge-primary-color)', marginTop: '2px' }}>{monthStr}</span>
+            </div>
+            {/* Note type icon overlay */}
+            <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-[var(--nm-background)] shadow-[var(--nm-shadow-main)] flex items-center justify-center z-10">
+              <Icon className="w-2.5 h-2.5" style={{ color: 'var(--nm-badge-primary-color)' }} />
+            </div>
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              {note.isPinned && (
+                <Pin className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#2f949d' }} />
+              )}
+              <span className="text-base font-normal truncate">{note.title || 'Untitled'}</span>
+            </div>
+            <div className="flex items-center gap-2 mt-2 flex-wrap" style={{ transform: 'translateY(-3px)' }}>
+              <NeumorphicBadge variant={typeVariant} size="sm">
+                {note.noteType || 'My Note'}
+              </NeumorphicBadge>
+              {note.linkedName && (
+                <NeumorphicBadge variant="primary" size="sm">
+                  {note.linkedName}
+                </NeumorphicBadge>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <ChevronRight className="w-4 h-4" style={{ color: 'var(--nm-badge-default-color)' }} />
+          </div>
+        </div>
+      </NeumorphicCard>
+    );
+  };
 
   return (
     <>
@@ -146,76 +200,95 @@ export default function NotesList() {
           setShowFilter(prev => !prev);
           if (showFilter) setSelectedNoteType('All');
         }}
+        extraFilters={
+          <div className="flex items-center gap-2">
+            {contactFilter ? (
+              <button
+                onClick={() => setContactFilter(null)}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full"
+                style={{
+                  background: 'var(--nm-background)',
+                  boxShadow: 'var(--nm-shadow-inset)',
+                  color: 'var(--nm-badge-primary-color)',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                {contactFilter.full_name} ×
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowContactFilterPanel(true)}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full"
+                style={{
+                  background: 'var(--nm-background)',
+                  boxShadow: 'var(--nm-shadow-main)',
+                  color: 'var(--nm-badge-default-color)',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                Filter by contact
+              </button>
+            )}
+          </div>
+        }
       />
 
       {filteredNotes.length === 0 ? (
         <NeumorphicCard className="p-8 text-center">
           <p style={{ color: 'var(--nm-badge-default-color)' }}>
-            {selectedNoteType === 'All' 
+            {selectedNoteType === 'All'
               ? 'No notes yet. Create your first note to get started.'
-              : `No ${selectedNoteType.toLowerCase()} notes found.`
-            }
+              : `No ${selectedNoteType.toLowerCase()} notes found.`}
           </p>
         </NeumorphicCard>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredNotes.map(note => {
-            const Icon = NOTE_TYPE_ICONS[note.noteType] || StickyNote;
-            const color = NOTE_TYPE_COLORS[note.noteType] || '#8b5cf6';
+        <div className="space-y-6">
+          {pinnedNotes.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium mb-3 px-1" style={{ color: 'var(--nm-badge-default-color)' }}>
+                Pinned ({pinnedNotes.length})
+              </h3>
+              <div className="flex flex-col gap-4">
+                {pinnedNotes.map(renderNote)}
+              </div>
+            </div>
+          )}
 
-            return (
-              <NeumorphicCard key={note.id} className="relative transition-all duration-200 hover:-translate-y-0.5 cursor-pointer">
-                {/* Pin indicator */}
-                {note.isPinned && (
-                  <div className="absolute top-3 right-3">
-                    <Pin className="w-4 h-4" style={{ color: '#2f949d' }} />
-                  </div>
-                )}
-
-                {/* Type icon and badge */}
-                <div className="flex items-center gap-2 mb-3">
-                  <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center"
-                    style={{ 
-                      background: `${color}15`,
-                      boxShadow: 'var(--nm-shadow-main)'
-                    }}
-                  >
-                    <Icon className="w-4 h-4" style={{ color }} />
-                  </div>
-                  <NeumorphicBadge variant="default" size="sm">
-                    {note.noteType || 'My Note'}
-                  </NeumorphicBadge>
-                </div>
-
-                {/* Title */}
-                <h4 className="text-base font-medium mb-1 line-clamp-1">
-                  {note.title || 'Untitled'}
-                </h4>
-
-                {/* Content preview */}
-                <p 
-                  className="text-sm line-clamp-2 mb-3"
-                  style={{ color: 'var(--nm-badge-default-color)' }}
-                >
-                  {note.content || 'No content'}
-                </p>
-
-                {/* Footer */}
-                <div className="flex items-center justify-between text-xs" style={{ color: 'var(--nm-badge-default-color)' }}>
-                  <span>{note.linkedName || ''}</span>
-                  <span>{formatDate(note.created_date)}</span>
-                </div>
-              </NeumorphicCard>
-            );
-          })}
+          {otherNotes.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium mb-3 px-1" style={{ color: 'var(--nm-badge-default-color)' }}>
+                {pinnedNotes.length > 0 ? `All Notes (${otherNotes.length})` : `Notes (${otherNotes.length})`}
+              </h3>
+              <div className="flex flex-col gap-4">
+                {otherNotes.map(renderNote)}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
+      {/* Note Detail / Edit Panel */}
       <NoteDetailPanel
-        open={showCreateNote}
-        onClose={() => setShowCreateNote(false)}
+        open={showCreateNote || !!selectedNote}
+        note={selectedNote}
+        onClose={() => {
+          setShowCreateNote(false);
+          setSelectedNote(null);
+        }}
         backLabel="Back to Notebook"
+      />
+
+      {/* Contact Filter Panel */}
+      <ContactSelectionPanel
+        open={showContactFilterPanel}
+        onClose={() => setShowContactFilterPanel(false)}
+        currentContactId={contactFilter?.id}
+        onSelect={(contact) => {
+          setContactFilter(contact);
+          setShowContactFilterPanel(false);
+        }}
       />
     </>
   );
