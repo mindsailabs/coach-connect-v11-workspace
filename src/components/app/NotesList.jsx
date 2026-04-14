@@ -159,8 +159,8 @@ export default function NotesList({ selectedNote: externalSelectedNote, onNoteSe
               <span className="text-[10px] font-bold uppercase tracking-wider leading-none" style={{ color: 'var(--nm-badge-primary-color)', marginTop: '2px' }}>{monthStr}</span>
             </div>
             {/* Note type icon overlay */}
-            <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-[var(--nm-background)] shadow-[var(--nm-shadow-main)] flex items-center justify-center z-10">
-              <Icon className="w-2.5 h-2.5" style={{ color: 'var(--nm-badge-primary-color)' }} />
+            <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-[var(--nm-background)] shadow-[var(--nm-shadow-main)] flex items-center justify-center z-10 p-0.5">
+              <Icon className="w-full h-full" style={{ color: 'var(--nm-badge-primary-color)' }} />
             </div>
           </div>
 
@@ -172,9 +172,11 @@ export default function NotesList({ selectedNote: externalSelectedNote, onNoteSe
               <span className="text-base font-normal truncate">{note.title || 'Untitled'}</span>
             </div>
             <div className="flex items-center gap-2 mt-2 flex-wrap" style={{ transform: 'translateY(-3px)' }}>
-              <NeumorphicBadge variant={typeVariant} size="sm">
-                {note.noteType || 'My Note'}
-              </NeumorphicBadge>
+              {!note.linkedContact && (
+                <NeumorphicBadge variant={typeVariant} size="sm">
+                  {note.noteType || 'My Note'}
+                </NeumorphicBadge>
+              )}
               {note.linkedName && (
                 <NeumorphicBadge variant="primary" size="sm">
                   {note.linkedName}
