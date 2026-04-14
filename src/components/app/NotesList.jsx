@@ -26,9 +26,15 @@ const NOTE_TYPE_VARIANTS = {
   'Task Note': 'info',
 };
 
-export default function NotesList() {
+export default function NotesList({ selectedNote: externalSelectedNote, onNoteSelect }) {
   const [showCreateNote, setShowCreateNote] = useState(false);
-  const [selectedNote, setSelectedNote] = useState(null);
+  const [internalSelectedNote, setInternalSelectedNote] = useState(null);
+
+  const selectedNote = externalSelectedNote !== undefined ? externalSelectedNote : internalSelectedNote;
+  const setSelectedNote = (note) => {
+    if (onNoteSelect) onNoteSelect(note);
+    else setInternalSelectedNote(note);
+  };
   const [selectedNoteType, setSelectedNoteType] = useState('All');
   const [searchValue, setSearchValue] = useState('');
   const [showFilter, setShowFilter] = useState(false);
@@ -278,6 +284,7 @@ export default function NotesList() {
           setSelectedNote(null);
         }}
         backLabel="Back to Notebook"
+
       />
 
       {/* Contact Filter Panel */}

@@ -47,6 +47,7 @@ export default function AppPage() {
     setContactEditResetKey((k) => k + 1);
     setShowNotePanel(false);
     setShowTaskPanel(false);
+    setSelectedNoteForDetail(null);
     setSettingsHasUnsaved(false);
     setShowSettingsUnsavedWarning(false);
     setAddSessionFromContact(false);
@@ -107,6 +108,7 @@ export default function AppPage() {
   const [noteBackLabel, setNoteBackLabel] = useState('Back');
   const [noteTitle, setNoteTitle] = useState('Add Note');
   const [noteInitialAssignment, setNoteInitialAssignment] = useState(null);
+  const [selectedNoteForDetail, setSelectedNoteForDetail] = useState(null);
 
   const [showTaskPanel, setShowTaskPanel] = useState(false);
   const [taskBackLabel, setTaskBackLabel] = useState('Back');
@@ -229,6 +231,9 @@ export default function AppPage() {
     }
     if (showNotePanel) {
       return { label: noteBackLabel, onClick: () => setShowNotePanel(false) };
+    }
+    if (selectedNoteForDetail) {
+      return { label: 'Back to Notebook', onClick: () => setSelectedNoteForDetail(null) };
     }
     if (showTaskPanel) {
       return { label: taskBackLabel, onClick: () => setShowTaskPanel(false) };
@@ -484,7 +489,7 @@ export default function AppPage() {
           activeItem === 'approvals' ?
           <ApprovalsList key={navResetKey} /> :
           activeItem === 'notebook' ?
-          <NotesList key={navResetKey} /> :
+          <NotesList key={navResetKey} selectedNote={selectedNoteForDetail} onNoteSelect={setSelectedNoteForDetail} /> :
           activeItem === 'settings' ?
           <SettingsSections key={navResetKey} onSectionChange={(section) => {setSettingsSection(section);setSettingsRequested(undefined);setShowSettingsUnsavedWarning(false);}} requestedSection={settingsRequested} onUnsavedChange={setSettingsHasUnsaved} onSaveHandlerChange={handleSettingsSaveRequest} onAvatarChange={setUserAvatarUrl} /> :
 
