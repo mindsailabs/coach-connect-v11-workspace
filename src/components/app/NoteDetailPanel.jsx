@@ -132,12 +132,6 @@ export default function NoteDetailPanel({ open, onClose, backLabel = 'Back', ini
     : 'Add Note';
 
   const headerIcons = [
-    // Assignment badge (always visible)
-    assignmentLabel && !isEditing ? (
-      <NeumorphicBadge key="assign-label" variant="primary" size="sm">
-        {assignmentLabel}
-      </NeumorphicBadge>
-    ) : null,
     // Reassign button when editing
     assignmentLabel && isEditing ? (
       <button
