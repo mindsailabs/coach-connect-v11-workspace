@@ -71,6 +71,8 @@ export default function NotesList({ selectedNote: externalSelectedNote, onNoteSe
   const notes = (notesData || []).map(note => {
     let linkedName = null;
     let linkedContactId = null;
+    let sessionName = null;
+    let journeyName = null;
 
     if (note.linkedContact) {
       const contact = (contactsData || []).find(c => c.id === note.linkedContact);
@@ -79,7 +81,6 @@ export default function NotesList({ selectedNote: externalSelectedNote, onNoteSe
     } else if (note.linkedSession) {
       const session = (sessionsData || []).find(s => s.id === note.linkedSession);
       linkedName = session?.title || 'Session';
-      // Also get the contact from the session for contact filtering
       if (session?.contact_id) linkedContactId = session.contact_id;
     } else if (note.linkedJourney) {
       const journey = (journeysData || []).find(j => j.id === note.linkedJourney);
@@ -89,10 +90,22 @@ export default function NotesList({ selectedNote: externalSelectedNote, onNoteSe
       linkedName = task?.title;
     }
 
+    // Extra context badges for contact notes that also reference a session or journey
+    if (note.linkedContact && note.linkedSession) {
+      const session = (sessionsData || []).find(s => s.id === note.linkedSession);
+      sessionName = session?.title || 'Session';
+    }
+    if (note.linkedContact && note.linkedJourney) {
+      const journey = (journeysData || []).find(j => j.id === note.linkedJourney);
+      journeyName = journey?.title || 'Journey';
+    }
+
     return {
       ...note,
       linkedName,
       linkedContactId,
+      sessionName,
+      journeyName,
     };
   }).sort((a, b) => {
     if (a.isPinned && !b.isPinned) return -1;
@@ -171,15 +184,27 @@ export default function NotesList({ selectedNote: externalSelectedNote, onNoteSe
               )}
               <span className="text-base font-normal truncate">{note.title || 'Untitled'}</span>
             </div>
-            <div className="flex items-center gap-2 mt-2 flex-wrap" style={{ transform: 'translateY(-3px)' }}>
-              {!note.linkedContact && (
-                <NeumorphicBadge variant={typeVariant} size="sm">
-                  {note.noteType || 'My Note'}
-                </NeumorphicBadge>
-              )}
-              {note.linkedName && (
-                <NeumorphicBadge variant="primary" size="sm">
-                  {note.linkedName}
+            <div className="flex items-center justify-between mt-2 gap-2" style={{ transform: 'translateY(-3px)' }}>
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                {!note.linkedContact && (
+                  <NeumorphicBadge variant={typeVariant} size="sm">
+                    {note.noteType || 'My Note'}
+                  </NeumorphicBadge>
+                )}
+                {note.linkedContact && note.linkedSession && (
+                  <NeumorphicBadge variant="warning" size="sm" className="truncate max-w-[120px]">
+                    {(note.sessionName || 'Session').length > 15 ? (note.sessionName || 'Session').slice(0, 15) + '…' : (note.sessionName || 'Session')}
+                  </NeumorphicBadge>
+                )}
+                {note.linkedContact && note.linkedJourney && (
+                  <NeumorphicBadge variant="learning" size="sm" className="truncate max-w-[120px]">
+                    {(note.journeyName || 'Journey').length > 15 ? (note.journeyName || 'Journey').slice(0, 15) + '…' : (note.journeyName || 'Journey')}
+                  </NeumorphicBadge>
+                )}
+              </div>
+              {note.linkedContact && note.linkedName && (
+                <NeumorphicBadge variant="primary" size="sm" className="flex-shrink-0 max-w-[110px] truncate">
+                  {note.linkedName.length > 14 ? note.linkedName.slice(0, 14) + '…' : note.linkedName}
                 </NeumorphicBadge>
               )}
             </div>
