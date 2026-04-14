@@ -342,7 +342,7 @@ export default function AppPage() {
       return { label: 'Back to Journeys', onClick: () => setSelectedJourneyForDetail(null) };
     }
     return null;
-  }, [notificationsOpen, settingsSection, settingsHasUnsaved, showNotePanel, noteBackLabel, showTaskPanel, taskBackLabel, showContactForm, selectedContactForDetail, selectedJourneyForDetail, selectedSessionForDetail, pendingSourceContact, contactHasUnsaved, activeItem, sessionsContactFilter, addJourneyFromContact, addSessionFromContact, activeSessionSubPanel]);
+  }, [notificationsOpen, settingsSection, settingsHasUnsaved, showNotePanel, noteBackLabel, selectedNoteForDetail, showTaskPanel, taskBackLabel, showContactForm, selectedContactForDetail, selectedJourneyForDetail, selectedSessionForDetail, pendingSourceContact, contactHasUnsaved, activeItem, sessionsContactFilter, addJourneyFromContact, addSessionFromContact, activeSessionSubPanel]);
 
   return (
     <div className="flex flex-col md:flex-row h-full bg-[--nm-background]">
